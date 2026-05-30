@@ -14,15 +14,18 @@ import org.springframework.transaction.annotation.Transactional;
 public class RegistrationRequestWorker {
 
     private final RegistrationRequestRepository registrationRequestRepository;
+    private final RegistrationRequestStatusService registrationRequestStatusService;
     private final RegistrationLookupOrchestrator registrationLookupOrchestrator;
     private final CompanyService companyService;
 
     public RegistrationRequestWorker(
             RegistrationRequestRepository registrationRequestRepository,
+            RegistrationRequestStatusService registrationRequestStatusService,
             RegistrationLookupOrchestrator registrationLookupOrchestrator,
             CompanyService companyService
     ) {
         this.registrationRequestRepository = registrationRequestRepository;
+        this.registrationRequestStatusService = registrationRequestStatusService;
         this.registrationLookupOrchestrator = registrationLookupOrchestrator;
         this.companyService = companyService;
     }
@@ -34,8 +37,7 @@ public class RegistrationRequestWorker {
             return;
         }
 
-        request.setStatus(RequestStatus.PROCESSING);
-        registrationRequestRepository.save(request);
+        registrationRequestStatusService.transition(request, RequestStatus.PROCESSING, null);
 
         try {
             applyLookupOutcome(
@@ -46,41 +48,36 @@ public class RegistrationRequestWorker {
                     )
             );
         } catch (RuntimeException ex) {
-            request.setStatus(RequestStatus.FAILED);
-            request.setErrorMessage(ex.getMessage() != null ? ex.getMessage() : "Registration failed");
+            registrationRequestStatusService.transition(
+                    request,
+                    RequestStatus.FAILED,
+                    ex.getMessage() != null ? ex.getMessage() : "Registration failed"
+            );
         }
-
-        registrationRequestRepository.save(request);
     }
 
     private void applyLookupOutcome(RegistrationRequest request, LookupOutcome outcome) {
         switch (outcome) {
-            case LookupOutcome.ExactMatch exactMatch -> applyExactMatch(request, exactMatch);
-            case LookupOutcome.NoMatch ignored -> registerNewCompany(request);
+            case LookupOutcome.LinkExisting link -> {
+                request.setCompanyId(link.company().getId());
+                registrationRequestStatusService.transition(request, RequestStatus.COMPLETED, null);
+            }
+            case LookupOutcome.Rejected rejected ->
+                    registrationRequestStatusService.transition(request, RequestStatus.FAILED, rejected.message());
+            case LookupOutcome.RegisterNew ignored -> registerNewCompany(request);
         }
-    }
-
-    private void applyExactMatch(RegistrationRequest request, LookupOutcome.ExactMatch exactMatch) {
-        if (exactMatch.sameName()) {
-            request.setStatus(RequestStatus.COMPLETED);
-            request.setCompanyId(exactMatch.company().getId());
-            request.setErrorMessage(null);
-            return;
-        }
-
-        request.setStatus(RequestStatus.FAILED);
-        request.setErrorMessage(
-                "Company with registration number '%s' already exists".formatted(request.getRegistrationNumber())
-        );
     }
 
     private void registerNewCompany(RegistrationRequest request) {
         var result = companyService.register(
-                new RegisterCompanyRequest(request.getRegistrationNumber(), request.getCompanyName())
+                new RegisterCompanyRequest(
+                        request.getClientRequestId(),
+                        request.getRegistrationNumber(),
+                        request.getCompanyName()
+                )
         );
-        request.setStatus(RequestStatus.COMPLETED);
         request.setCompanyId(result.company().id());
-        request.setErrorMessage(null);
+        registrationRequestStatusService.transition(request, RequestStatus.COMPLETED, null);
     }
 
 }

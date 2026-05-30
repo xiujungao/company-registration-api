@@ -1,0 +1,49 @@
+// Disabled: reference data is loaded via src/main/resources/db/ddl/data.sql
+// Renamed from ClientSeeder.java — not compiled or run by Spring.
+
+package com.jackie.companyregistration.config.seeder;
+
+import com.jackie.companyregistration.model.ApiClient;
+import com.jackie.companyregistration.repository.ApiClientRepository;
+import org.springframework.boot.ApplicationArguments;
+import org.springframework.boot.ApplicationRunner;
+import org.springframework.stereotype.Component;
+
+@Component
+public class ClientSeeder implements ApplicationRunner {
+
+    public static final String DEV_CLIENT_ID = "dev-client";
+    public static final String DEV_API_KEY = "dev-api-key-change-me";
+
+    public static final String PARTNER_CLIENT_ID = "partner-client";
+    public static final String PARTNER_API_KEY = "partner-api-key-change-me";
+
+    public static final String INTERNAL_CLIENT_ID = "internal-client";
+    public static final String INTERNAL_API_KEY = "internal-api-key-change-me";
+
+    private static final SeedClient[] CLIENTS = {
+            new SeedClient(DEV_CLIENT_ID, DEV_API_KEY),
+            new SeedClient(PARTNER_CLIENT_ID, PARTNER_API_KEY),
+            new SeedClient(INTERNAL_CLIENT_ID, INTERNAL_API_KEY),
+    };
+
+    private final ApiClientRepository apiClientRepository;
+
+    public ClientSeeder(ApiClientRepository apiClientRepository) {
+        this.apiClientRepository = apiClientRepository;
+    }
+
+    @Override
+    public void run(ApplicationArguments args) {
+        for (SeedClient client : CLIENTS) {
+            if (apiClientRepository.existsById(client.clientId())) {
+                continue;
+            }
+            apiClientRepository.save(new ApiClient(client.clientId(), client.apiKey()));
+        }
+    }
+
+    private record SeedClient(String clientId, String apiKey) {
+    }
+
+}

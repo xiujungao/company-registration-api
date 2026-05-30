@@ -3,17 +3,18 @@ package com.jackie.companyregistration.service;
 import com.jackie.companyregistration.dto.CompanyResponse;
 import com.jackie.companyregistration.dto.RegisterCompanyRequest;
 import com.jackie.companyregistration.dto.RegistrationRequestResponse;
+import com.jackie.companyregistration.dto.RegistrationRequestStatusHistoryEntry;
 import com.jackie.companyregistration.dto.RegistrationRequestStatusResponse;
+import com.jackie.companyregistration.exception.InvalidRegistrationRequestException;
 import com.jackie.companyregistration.exception.RequestNotFoundException;
-import com.jackie.companyregistration.model.Company;
 import com.jackie.companyregistration.model.RegistrationRequest;
 import com.jackie.companyregistration.model.RequestStatus;
 import com.jackie.companyregistration.repository.CompanyRepository;
 import com.jackie.companyregistration.repository.RegistrationRequestRepository;
-import java.time.Instant;
-import java.util.EnumSet;
+import com.jackie.companyregistration.repository.RegistrationRequestStatusHistoryRepository;
 import java.util.concurrent.Executor;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,15 +23,11 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Service
 public class RegistrationRequestService {
 
-    private static final EnumSet<RequestStatus> ACTIVE_OR_COMPLETED = EnumSet.of(
-            RequestStatus.PENDING,
-            RequestStatus.PROCESSING,
-            RequestStatus.COMPLETED
-    );
-
     private final RegistrationRequestRepository registrationRequestRepository;
     private final CompanyRepository companyRepository;
     private final RegistrationRequestWorker registrationRequestWorker;
+    private final RegistrationRequestStatusService registrationRequestStatusService;
+    private final RegistrationRequestStatusHistoryRepository statusHistoryRepository;
     private final Executor registrationTaskExecutor;
     private final TransactionTemplate transactionTemplate;
 
@@ -38,85 +35,70 @@ public class RegistrationRequestService {
             RegistrationRequestRepository registrationRequestRepository,
             CompanyRepository companyRepository,
             RegistrationRequestWorker registrationRequestWorker,
+            RegistrationRequestStatusService registrationRequestStatusService,
+            RegistrationRequestStatusHistoryRepository statusHistoryRepository,
             @Qualifier("registrationTaskExecutor") Executor registrationTaskExecutor,
             PlatformTransactionManager transactionManager
     ) {
         this.registrationRequestRepository = registrationRequestRepository;
         this.companyRepository = companyRepository;
         this.registrationRequestWorker = registrationRequestWorker;
+        this.registrationRequestStatusService = registrationRequestStatusService;
+        this.statusHistoryRepository = statusHistoryRepository;
         this.registrationTaskExecutor = registrationTaskExecutor;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
     public RegistrationRequestResponse submit(RegisterCompanyRequest request, String clientId) {
-        var duplicateResponse = findDuplicateResponse(request, clientId);
-        if (duplicateResponse != null) {
-            return duplicateResponse;
+        var existingByClientRequestId = findExistingByClientRequestId(clientId, request);
+        if (existingByClientRequestId != null) {
+            return existingByClientRequestId;
         }
 
-        var response = transactionTemplate.execute(status -> {
-            var registrationRequest = registrationRequestRepository.save(
-                    new RegistrationRequest(clientId, request.registrationNumber(), request.name())
-            );
-            return RegistrationRequestResponse.fromNew(registrationRequest);
-        });
+        RegistrationRequestResponse response;
+        try {
+            response = transactionTemplate.execute(status -> {
+                var registrationRequest = registrationRequestStatusService.createPending(
+                        new RegistrationRequest(
+                                clientId,
+                                request.clientRequestId(),
+                                request.registrationNumber(),
+                                request.name()
+                        )
+                );
+                return RegistrationRequestResponse.fromNew(registrationRequest);
+            });
+        } catch (DataIntegrityViolationException ex) {
+            var recovered = findExistingByClientRequestId(clientId, request);
+            if (recovered != null) {
+                return recovered;
+            }
+            throw ex;
+        }
 
         registrationTaskExecutor.execute(() -> registrationRequestWorker.process(response.requestId()));
         return response;
     }
 
-    private RegistrationRequestResponse findDuplicateResponse(RegisterCompanyRequest request, String clientId) {
-        var existingCompany = companyRepository.findByRegistrationNumber(request.registrationNumber());
-        if (existingCompany.isPresent()) {
-            return duplicateForExistingCompany(existingCompany.get(), request, clientId);
-        }
-
-        return registrationRequestRepository
-                .findFirstByClientIdAndRegistrationNumberAndCompanyNameAndStatusInOrderByCreatedAtDesc(
-                        clientId,
-                        request.registrationNumber(),
-                        request.name(),
-                        ACTIVE_OR_COMPLETED
-                )
-                .map(existingRequest -> RegistrationRequestResponse.duplicate(
-                        existingRequest,
-                        "Registration request already submitted",
-                        resolveCompany(existingRequest)
-                ))
-                .orElse(null);
-    }
-
-    private RegistrationRequestResponse duplicateForExistingCompany(
-            Company company,
-            RegisterCompanyRequest request,
-            String clientId
+    private RegistrationRequestResponse findExistingByClientRequestId(
+            String clientId,
+            RegisterCompanyRequest request
     ) {
-        var companyResponse = CompanyResponse.from(company);
-        var linkedRequest = registrationRequestRepository
-                .findFirstByClientIdAndRegistrationNumberAndStatusOrderByCreatedAtDesc(
-                        clientId,
-                        request.registrationNumber(),
-                        RequestStatus.COMPLETED
-                );
-
-        if (company.getName().equals(request.name())) {
-            return RegistrationRequestResponse.duplicateCompany(
-                    linkedRequest.map(RegistrationRequest::getId).orElse(null),
-                    linkedRequest.map(RegistrationRequest::getCreatedAt).orElse(Instant.now()),
-                    request.registrationNumber(),
-                    "Company already registered",
-                    companyResponse
-            );
-        }
-
-        return RegistrationRequestResponse.duplicateCompany(
-                linkedRequest.map(RegistrationRequest::getId).orElse(null),
-                linkedRequest.map(RegistrationRequest::getCreatedAt).orElse(Instant.now()),
-                request.registrationNumber(),
-                "Company with registration number '%s' is already registered as '%s'"
-                        .formatted(request.registrationNumber(), company.getName()),
-                companyResponse
-        );
+        return registrationRequestRepository.findByClientIdAndClientRequestId(clientId, request.clientRequestId())
+                .map(existing -> {
+                    if (!existing.matchesPayload(request.registrationNumber(), request.name())) {
+                        throw new InvalidRegistrationRequestException(
+                                "Client request id '%s' was already used with a different registration payload"
+                                        .formatted(request.clientRequestId())
+                        );
+                    }
+                    return RegistrationRequestResponse.duplicate(
+                            existing,
+                            "Duplicate request",
+                            resolveCompany(existing)
+                    );
+                })
+                .orElse(null);
     }
 
     @Transactional(readOnly = true)
@@ -127,15 +109,26 @@ public class RegistrationRequestService {
     }
 
     private RegistrationRequestStatusResponse toStatusResponse(RegistrationRequest request) {
+        var statusHistory = statusHistoryRepository.findByRegistrationRequestIdOrderByChangedAtAsc(request.getId())
+                .stream()
+                .map(entry -> new RegistrationRequestStatusHistoryEntry(
+                        RequestStatus.valueOf(entry.getStatus().getCode()),
+                        entry.getChangedAt(),
+                        entry.getErrorMessage()
+                ))
+                .toList();
+
         return new RegistrationRequestStatusResponse(
                 request.getId(),
+                request.getClientRequestId(),
                 request.getStatus(),
                 request.getRegistrationNumber(),
                 request.getCompanyName(),
                 resolveCompany(request),
                 request.getErrorMessage(),
                 request.getCreatedAt(),
-                request.getUpdatedAt()
+                request.getUpdatedAt(),
+                statusHistory
         );
     }
 

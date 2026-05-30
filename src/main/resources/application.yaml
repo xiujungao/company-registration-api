@@ -6,7 +6,7 @@ spring:
     name: company-registration-api
   datasource:
     url: ${app.db.url:jdbc:h2:mem:companies}
-    driver-class-name: org.h2.Driver
+    driver-class-name: ${app.db.driver-class-name:org.h2.Driver}
     username: ${app.db.username:sa}
     password: ${app.db.password:}
   jpa:

@@ -1,7 +1,5 @@
 package com.jackie.companyregistration.service.lookup;
 
-import com.jackie.companyregistration.model.Company;
-import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,14 +13,14 @@ public class RegistrationLookupOrchestrator {
 
     private static final Logger log = LoggerFactory.getLogger(RegistrationLookupOrchestrator.class);
 
-    private final ExactMatchLookupService exactMatchLookupService;
+    private final CompanyDbLookupService companyDbLookupService;
     private final VectorSearchService vectorSearchService;
 
     public RegistrationLookupOrchestrator(
-            ExactMatchLookupService exactMatchLookupService,
+            CompanyDbLookupService companyDbLookupService,
             VectorSearchService vectorSearchService
     ) {
-        this.exactMatchLookupService = exactMatchLookupService;
+        this.companyDbLookupService = companyDbLookupService;
         this.vectorSearchService = vectorSearchService;
     }
 
@@ -31,8 +29,9 @@ public class RegistrationLookupOrchestrator {
     }
 
     Mono<LookupOutcome> resolveAsync(String registrationNumber, String companyName) {
-        Mono<Optional<Company>> vectorSearch = vectorSearchService.searchByName(companyName)
+        Mono<LookupOutcome> vectorSearch = vectorSearchService.searchByName(companyName)
                 .subscribeOn(Schedulers.boundedElastic())
+                .map(ignored -> (LookupOutcome) new LookupOutcome.RegisterNew())
                 .cache();
 
         AtomicReference<Disposable> vectorSubscription = new AtomicReference<>();
@@ -41,35 +40,26 @@ public class RegistrationLookupOrchestrator {
                 error -> log.warn("Vector search failed for '{}'", companyName, error)
         ));
 
-        return exactMatchLookupService.lookup(registrationNumber)
+        return companyDbLookupService.lookup(registrationNumber, companyName)
                 .subscribeOn(Schedulers.boundedElastic())
-                .flatMap(exactMatch -> {
-                    if (exactMatch.isPresent()) {
-                        cancelVectorSearch(vectorSubscription, registrationNumber);
-                        Company company = exactMatch.get();
-                        return Mono.just(new LookupOutcome.ExactMatch(
-                                company,
-                                company.getName().equals(companyName)
-                        ));
+                .flatMap(dbResult -> switch (dbResult) {
+                    case CompanyDbLookupResult.LinkExisting link -> {
+                        cancelVectorSearch(vectorSubscription, companyName);
+                        yield Mono.just(new LookupOutcome.LinkExisting(link.company()));
                     }
-
-                    return vectorSearch.map(vectorMatch -> toOutcomeAfterVectorSearch(vectorMatch, companyName));
+                    case CompanyDbLookupResult.Rejected rejected -> {
+                        cancelVectorSearch(vectorSubscription, companyName);
+                        yield Mono.just(new LookupOutcome.Rejected(rejected.message()));
+                    }
+                    case CompanyDbLookupResult.NoMatch ignored -> vectorSearch;
                 });
     }
 
-    private LookupOutcome toOutcomeAfterVectorSearch(Optional<Company> vectorMatch, String companyName) {
-        if (vectorMatch.isPresent()) {
-            Company company = vectorMatch.get();
-            return new LookupOutcome.ExactMatch(company, company.getName().equals(companyName));
-        }
-        return new LookupOutcome.NoMatch();
-    }
-
-    private void cancelVectorSearch(AtomicReference<Disposable> vectorSubscription, String registrationNumber) {
+    private void cancelVectorSearch(AtomicReference<Disposable> vectorSubscription, String companyName) {
         Disposable subscription = vectorSubscription.getAndSet(null);
         if (subscription != null && !subscription.isDisposed()) {
             subscription.dispose();
-            log.debug("Cancelled vector search for registration number '{}'", registrationNumber);
+            log.debug("Cancelled vector search for company name '{}'", companyName);
         }
     }
 

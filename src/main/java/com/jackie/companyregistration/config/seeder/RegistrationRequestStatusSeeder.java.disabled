@@ -1,0 +1,42 @@
+// Disabled: reference data is loaded via src/main/resources/db/ddl/data.sql
+// Renamed from RegistrationRequestStatusSeeder.java — not compiled or run by Spring.
+
+package com.jackie.companyregistration.config.seeder;
+
+import com.jackie.companyregistration.model.RequestStatus;
+import com.jackie.companyregistration.model.RegistrationRequestStatusEntity;
+import com.jackie.companyregistration.repository.RegistrationRequestStatusRepository;
+import org.springframework.boot.ApplicationArguments;
+import org.springframework.boot.ApplicationRunner;
+import org.springframework.core.annotation.Order;
+import org.springframework.stereotype.Component;
+
+@Component
+@Order(1)
+public class RegistrationRequestStatusSeeder implements ApplicationRunner {
+
+    private final RegistrationRequestStatusRepository registrationRequestStatusRepository;
+
+    public RegistrationRequestStatusSeeder(
+            RegistrationRequestStatusRepository registrationRequestStatusRepository
+    ) {
+        this.registrationRequestStatusRepository = registrationRequestStatusRepository;
+    }
+
+    @Override
+    public void run(ApplicationArguments args) {
+        for (RequestStatus status : RequestStatus.values()) {
+            registrationRequestStatusRepository.findById(status.name())
+                    .ifPresentOrElse(
+                            existing -> {
+                                existing.syncFrom(status);
+                                registrationRequestStatusRepository.save(existing);
+                            },
+                            () -> registrationRequestStatusRepository.save(
+                                    RegistrationRequestStatusEntity.from(status)
+                            )
+                    );
+        }
+    }
+
+}

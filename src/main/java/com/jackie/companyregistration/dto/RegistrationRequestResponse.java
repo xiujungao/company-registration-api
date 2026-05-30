@@ -6,6 +6,7 @@ import java.time.Instant;
 
 public record RegistrationRequestResponse(
         Long requestId,
+        String clientRequestId,
         RequestStatus status,
         String registrationNumber,
         Instant createdAt,
@@ -17,6 +18,7 @@ public record RegistrationRequestResponse(
     public static RegistrationRequestResponse fromNew(RegistrationRequest request) {
         return new RegistrationRequestResponse(
                 request.getId(),
+                request.getClientRequestId(),
                 request.getStatus(),
                 request.getRegistrationNumber(),
                 request.getCreatedAt(),
@@ -33,27 +35,10 @@ public record RegistrationRequestResponse(
     ) {
         return new RegistrationRequestResponse(
                 request.getId(),
+                request.getClientRequestId(),
                 request.getStatus(),
                 request.getRegistrationNumber(),
                 request.getCreatedAt(),
-                true,
-                message,
-                company
-        );
-    }
-
-    public static RegistrationRequestResponse duplicateCompany(
-            Long requestId,
-            Instant createdAt,
-            String registrationNumber,
-            String message,
-            CompanyResponse company
-    ) {
-        return new RegistrationRequestResponse(
-                requestId,
-                RequestStatus.COMPLETED,
-                registrationNumber,
-                createdAt,
                 true,
                 message,
                 company

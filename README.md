@@ -1,6 +1,6 @@
 # company-registration-api
 
-REST API to register a company asynchronously, with API-key authentication, idempotent submit, and concurrent duplicate detection (exact match + vector search placeholder).
+REST API to register a company asynchronously, with API-key authentication, `clientRequestId` dedup on submit, and background duplicate detection (DB lookup + vector search placeholder).
 
 ## Stack
 
@@ -24,22 +24,26 @@ Base package: `com.jackie.companyregistration`
 |---------|----------------|
 | `controller` | REST endpoints |
 | `service` | Registration workflow, company persistence |
-| `service.lookup` | Exact-match + vector-search orchestration (Reactor) |
+| `service.lookup` | `CompanyDbLookupService` + vector-search orchestration (Reactor) |
 | `security` | API-key filter and client context |
-| `config` | Async executor, client seeder, filter registration |
+| `config` | Async executor, API filter registration |
+| `config.seeder` | Disabled Java seeders (`.java.disabled`); use `db/ddl/data.sql` instead |
 | `model` / `repository` / `dto` / `exception` | Domain, persistence, API types |
 
 ## Configuration
 
-Environment-specific values live in `env.yaml` at the project root (not committed). Copy the template before first run:
+Environment-specific values live in `env.yaml` at the project root (not committed). For local in-memory H2, copy `env.h2.yaml`:
 
 ```bash
-cp env.yaml.example env.yaml
+cp env.h2.yaml env.yaml
 ```
+
+For PostgreSQL (e.g. Neon), set `app.db.url`, `username`, `password`, and `driver-class-name: org.postgresql.Driver` in `env.yaml`.
 
 | Key | Description |
 |-----|-------------|
 | `app.db.url` | JDBC connection URL |
+| `app.db.driver-class-name` | JDBC driver (`org.h2.Driver` or `org.postgresql.Driver`) |
 | `app.db.username` | Database username |
 | `app.db.password` | Database password |
 | `app.ssl.keystore-path` | Keystore location (`classpath:...` or `file:...`) |
@@ -57,13 +61,20 @@ Application settings in `src/main/resources/application.yaml`:
 
 DDL script: `src/main/resources/db/ddl/schema.sql`
 
-Run it against your database before pointing the app at a persistent store (PostgreSQL, MySQL, etc.). Hibernate `ddl-auto: update` is enabled for local H2 development; use the script when you manage schema explicitly in other environments.
+Seed / reference data: `src/main/resources/db/ddl/data.sql` (clients, `registration_request_statuses`). Uses `INSERT ... ON CONFLICT` (H2 2.x and PostgreSQL). Run after schema when not using Java seeders.
+
+Tear-down: `src/main/resources/db/ddl/drop.sql` drops all application tables (H2 2.x and PostgreSQL). Use before re-running `schema.sql` on a non-empty database.
+
+Run scripts against your database before pointing the app at a persistent store (PostgreSQL, MySQL, etc.). Hibernate `ddl-auto: update` is enabled for local H2 development; use the scripts when you manage schema and data explicitly in other environments.
 
 | Table | Purpose |
 |-------|---------|
-| `clients` | API client id and API key (authentication; future rate limiting by `client_id`) |
-| `companies` | Registered companies |
-| `registration_requests` | Async job status per client (`requestId`, status, linked `company_id`) |
+| `clients` | API client id and API key; `created_at` / `updated_at` timestamps |
+| `registration_request_statuses` | Lookup table for registration request statuses; seeded from `RequestStatus` enum on startup |
+| `companies` | Registered companies; `status` (`ACTIVE` / `INACTIVE`); unique `registration_number`; unique `name` among ACTIVE rows only (`uk_companies_name_active`); timestamps |
+| `company_name_history` | Append-only log of company names (`name`, `changed_at`); order by timestamp to see renames |
+| `registration_requests` | Async job per client; `status_code` → `registration_request_statuses`; `client_id` → `clients`; index `idx_registration_requests_pending_reg_created` for scheduled polling |
+| `registration_request_status_history` | Append-only log of status transitions per request |
 
 ## Authentication
 
@@ -71,11 +82,13 @@ All `/api/**` endpoints require an API key in the `X-API-Key` header. Valid keys
 
 On success, the authenticated `client_id` is attached to the request (`ApiClientContext`) for throttling or auditing.
 
-Dev client seeded on startup:
+Dev clients (see `db/ddl/data.sql`):
 
 | `client_id` | `api_key` |
 |-------------|-----------|
 | `dev-client` | `dev-api-key-change-me` |
+| `partner-client` | `partner-api-key-change-me` |
+| `internal-client` | `internal-api-key-change-me` |
 
 Add more clients by inserting rows into `clients`.
 
@@ -114,30 +127,43 @@ keytool -genkeypair -alias company-registration-api -keyalg RSA -keysize 2048 \
 ### Submit path (synchronous)
 
 1. Validate API key → resolve `client_id`
-2. **Idempotent pre-check** before creating a new request:
-   - Company already exists → **200 OK**, `duplicate: true`, full `company` (no new job)
-   - In-flight request with same reg# + name → **200 OK**, existing `requestId`
+2. Same `clientRequestId` for this client → **200 OK**, existing internal `requestId` (`duplicate: true`). Reusing the id with a different payload → **400 Bad Request**.
 3. Otherwise save `registration_requests` row (`PENDING`) → **202 Accepted**, process in background
+
+No registration-number or company-name validation runs on submit. All company checks happen in the background worker.
+
+**Double-submit protection:** the webapp sends a stable `clientRequestId` (UUID per submission) in the JSON body. The API enforces `UNIQUE (client_id, client_request_id)`.
+
+**Scheduled processing (planned):** pending requests for the same `registrationNumber` are processed sequentially across all clients (oldest `created_at` first per registration number). Index `idx_registration_requests_pending_reg_created` on `(registration_number, created_at) WHERE status_code = 'PENDING'` supports that poll query.
 
 ### Background worker (`RegistrationRequestWorker`)
 
+**Current:** each accepted request is processed immediately on a background executor (requests may run in parallel).
+
+**Planned:** replace with a scheduled job that polls `PENDING` rows (see index + query in `schema.sql`) and processes the same `registrationNumber` sequentially across all clients.
+
 Status flow: `PENDING` → `PROCESSING` → `COMPLETED` | `FAILED`
+
+Each transition is recorded in `registration_request_status_history`. Allowed status codes are stored in `registration_request_statuses` (see `db/ddl/data.sql`; aligned with the `RequestStatus` enum).
 
 Before insert or reject, `RegistrationLookupOrchestrator` runs **two lookups in parallel** (Project Reactor `Mono`):
 
 ```
-                    ┌─ ExactMatchLookupService ── registrationNumber DB lookup
+                    ┌─ CompanyDbLookupService ── registration_number then name (ACTIVE only)
 RegistrationRequest │
-                    └─ VectorSearchService     ── name similarity (placeholder, 1s delay)
+                    └─ VectorSearchService      ── name similarity (placeholder, 1s delay)
 ```
 
-| Lookup result | Worker action |
-|---------------|---------------|
-| Exact match, same name | Cancel vector search → `COMPLETED` (link existing company) |
-| Exact match, different name | Cancel vector search → `FAILED` |
-| No exact match | Wait for vector search → currently always no match → insert company → `COMPLETED` |
+`CompanyDbLookupService` checks **ACTIVE** companies only. Inactive companies do not block reuse of their name.
 
-Vector logic lives in `VectorSearchService.findSimilarCompany()` (placeholder returns empty). When implemented, return a matching `Company` and the orchestrator will treat it as an exact-match outcome.
+| DB lookup result | Worker action |
+|------------------|---------------|
+| `registrationNumber` exists (ACTIVE), same name | Cancel vector search → `COMPLETED` (link existing company) |
+| `registrationNumber` exists (ACTIVE), different name | Cancel vector search → `FAILED` (use update name API) |
+| `registrationNumber` not found, exact name match (ACTIVE) | Cancel vector search → `FAILED` (name registered under another number) |
+| No DB match | Wait for vector search → currently always no match → insert company → `COMPLETED` |
+
+Vector logic lives in `VectorSearchService.findSimilarCompany()` (placeholder returns empty). When implemented, close matches will create a human-review task instead of auto-registering.
 
 ## API
 
@@ -151,14 +177,17 @@ Use `-k` with curl for the self-signed dev certificate.
 curl -k -X POST https://localhost:8443/api/companies \
   -H "Content-Type: application/json" \
   -H "X-API-Key: dev-api-key-change-me" \
-  -d "{\"registrationNumber\":\"REG-001\",\"name\":\"Acme Corp\"}"
+  -d "{\"clientRequestId\":\"7c9e6679-7425-40de-944b-e07fc1f90ae7\",\"registrationNumber\":\"REG-001\",\"name\":\"Acme Corp\"}"
 ```
+
+Required field **`clientRequestId`**: generate once per form submission in the webapp (UUID) and reuse on retries or double-clicks. Replays with the same id and payload return the original internal `requestId`. Reusing an id with a different payload returns **400 Bad Request**.
 
 **202 Accepted** — new request queued:
 
 ```json
 {
   "requestId": 1,
+  "clientRequestId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
   "status": "PENDING",
   "registrationNumber": "REG-001",
   "createdAt": "2026-05-30T12:00:00Z",
@@ -168,25 +197,22 @@ curl -k -X POST https://localhost:8443/api/companies \
 }
 ```
 
-**200 OK** — idempotent duplicate (company already registered; no new job):
+**200 OK** — same `clientRequestId` replay (no new job):
 
 ```json
 {
   "requestId": 1,
-  "status": "COMPLETED",
+  "clientRequestId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+  "status": "PENDING",
   "registrationNumber": "REG-001",
   "createdAt": "2026-05-30T12:00:00Z",
   "duplicate": true,
-  "message": "Company already registered",
-  "company": {
-    "id": 1,
-    "registrationNumber": "REG-001",
-    "name": "Acme Corp"
-  }
+  "message": "Duplicate request",
+  "company": null
 }
 ```
 
-Same `registrationNumber` with a **different name** also returns **200 OK**, `duplicate: true`, a descriptive `message`, and the existing `company`.
+Use `GET /api/companies/requests/{requestId}` to poll until `COMPLETED` or `FAILED`. Conflicts (same `registrationNumber` with a different name, or same name under a different number) surface as `FAILED` on the request, not as **400** on submit.
 
 ### Check registration status
 
@@ -208,7 +234,19 @@ curl -k https://localhost:8443/api/companies/requests/1 \
   "company": null,
   "errorMessage": null,
   "createdAt": "2026-05-30T12:00:00Z",
-  "updatedAt": "2026-05-30T12:00:01Z"
+  "updatedAt": "2026-05-30T12:00:01Z",
+  "statusHistory": [
+    {
+      "status": "PENDING",
+      "changedAt": "2026-05-30T12:00:00Z",
+      "errorMessage": null
+    },
+    {
+      "status": "PROCESSING",
+      "changedAt": "2026-05-30T12:00:01Z",
+      "errorMessage": null
+    }
+  ]
 }
 ```
 
@@ -223,11 +261,17 @@ curl -k https://localhost:8443/api/companies/requests/1 \
   "company": {
     "id": 1,
     "registrationNumber": "REG-001",
-    "name": "Acme Corp"
+    "name": "Acme Corp",
+    "status": "ACTIVE"
   },
   "errorMessage": null,
   "createdAt": "2026-05-30T12:00:00Z",
-  "updatedAt": "2026-05-30T12:00:02Z"
+  "updatedAt": "2026-05-30T12:00:02Z",
+  "statusHistory": [
+    { "status": "PENDING", "changedAt": "2026-05-30T12:00:00Z", "errorMessage": null },
+    { "status": "PROCESSING", "changedAt": "2026-05-30T12:00:01Z", "errorMessage": null },
+    { "status": "COMPLETED", "changedAt": "2026-05-30T12:00:02Z", "errorMessage": null }
+  ]
 }
 ```
 
@@ -240,7 +284,7 @@ curl -k https://localhost:8443/api/companies/requests/1 \
   "registrationNumber": "REG-001",
   "companyName": "Other Name",
   "company": null,
-  "errorMessage": "Company with registration number 'REG-001' already exists",
+  "errorMessage": "Registration number 'REG-001' is already registered with company name 'Acme Corp'. Use the update name API to change it.",
   "createdAt": "2026-05-30T12:00:00Z",
   "updatedAt": "2026-05-30T12:00:02Z"
 }
@@ -248,15 +292,46 @@ curl -k https://localhost:8443/api/companies/requests/1 \
 
 **404 Not Found** — unknown `requestId` or request owned by another client.
 
+### Update company name
+
+`PATCH /api/companies/{registrationNumber}/name`
+
+Use this when the company is already registered and the client needs to change the display name. `registrationNumber` stays the same.
+
+```bash
+curl -k -X PATCH https://localhost:8443/api/companies/REG-001/name \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: dev-api-key-change-me" \
+  -d "{\"name\":\"Acme International\"}"
+```
+
+**200 OK:**
+
+```json
+{
+  "id": 1,
+  "registrationNumber": "REG-001",
+  "name": "Acme International",
+  "status": "ACTIVE"
+}
+```
+
+Name changes are recorded in `company_name_history` (`name`, `changed_at`). Rows are ordered by `changed_at` to reconstruct the rename timeline.
+
+**404 Not Found** — unknown `registrationNumber`. **409 Conflict** — new name already used by another ACTIVE company.
+
 ### HTTP status summary
 
 | Status | When |
 |--------|------|
 | **202 Accepted** | New async registration queued |
-| **200 OK** | Idempotent duplicate on submit, or status poll success |
-| **400 Bad Request** | Validation error (missing fields) |
+| **200 OK** | Same `clientRequestId` replay on submit, or status poll success |
+| **400 Bad Request** | Validation error, or same `clientRequestId` reused with a different payload |
 | **401 Unauthorized** | Missing or invalid API key |
-| **404 Not Found** | Unknown registration request |
+| **404 Not Found** | Unknown registration request or company (PATCH name) |
+| **409 Conflict** | PATCH name: new name already used by another ACTIVE company |
+
+Registration conflicts (same reg# with different name, or same name under another reg#) return **`FAILED`** on the async request after worker processing, not **400** on submit.
 
 **401 example:**
 
