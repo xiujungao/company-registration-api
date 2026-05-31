@@ -2,6 +2,12 @@
 
 REST API to register a company asynchronously, with API-key authentication, `clientRequestId` dedup on submit, and background duplicate detection (DB lookup + vector search placeholder).
 
+## Demo guide
+
+Presentation-friendly overview (purpose, flows, status diagram, tech stack): **[docs/demo.html](docs/demo.html)** — open in a browser for demos.
+
+**Documentation maintenance:** when you change API behavior, architecture, or stack details, update **both** this README and `docs/demo.html` so they stay aligned.
+
 ## Stack
 
 - Java 25
@@ -281,12 +287,12 @@ curl -k https://localhost:8443/api/companies/requests/1 \
 
 ### Update company name
 
-`PATCH /api/companies/{registrationNumber}/name`
+`PUT /api/companies/{registrationNumber}`
 
-Use this when the company is already registered and the client needs to change the display name. `registrationNumber` stays the same.
+Use this when the company is **ACTIVE** and the client needs to change the display name. `registrationNumber` stays the same. INACTIVE companies must be reactivated via `POST /api/companies` (register), not renamed here.
 
 ```bash
-curl -k -X PATCH https://localhost:8443/api/companies/REG-001/name \
+curl -k -X PUT https://localhost:8443/api/companies/REG-001 \
   -H "Content-Type: application/json" \
   -H "X-API-Key: dev-api-key-change-me" \
   -d "{\"name\":\"Acme International\"}"
@@ -305,7 +311,7 @@ curl -k -X PATCH https://localhost:8443/api/companies/REG-001/name \
 
 Name changes are recorded in `company_name_history` (`name`, `changed_at`). Rows are ordered by `changed_at` to reconstruct the rename timeline.
 
-**404 Not Found** — unknown `registrationNumber`. **409 Conflict** — new name already used by another ACTIVE company.
+**404 Not Found** — unknown `registrationNumber`. **409 Conflict** — company is INACTIVE, or new name already used by another ACTIVE company.
 
 ### HTTP status summary
 
@@ -315,8 +321,8 @@ Name changes are recorded in `company_name_history` (`name`, `changed_at`). Rows
 | **200 OK** | Same `clientRequestId` replay on submit, or status poll success |
 | **400 Bad Request** | Validation error, or same `clientRequestId` reused with a different payload |
 | **401 Unauthorized** | Missing or invalid API key |
-| **404 Not Found** | Unknown registration request or company (PATCH name) |
-| **409 Conflict** | PATCH name: new name already used by another ACTIVE company |
+| **404 Not Found** | Unknown registration request or company (PUT name) |
+| **409 Conflict** | PUT name: company INACTIVE, or new name already used by another ACTIVE company |
 
 Registration conflicts (same reg# with different name, or same name under another reg#) return **`FAILED`** on the async request after worker processing, not **400** on submit.
 

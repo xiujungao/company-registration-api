@@ -2,6 +2,7 @@ package com.jackie.companyregistration.service;
 
 import com.jackie.companyregistration.dto.CompanyResponse;
 import com.jackie.companyregistration.dto.RegisterCompanyRequest;
+import com.jackie.companyregistration.exception.CompanyInactiveException;
 import com.jackie.companyregistration.exception.CompanyNotFoundException;
 import com.jackie.companyregistration.exception.DuplicateCompanyException;
 import com.jackie.companyregistration.exception.DuplicateCompanyNameException;
@@ -22,6 +23,9 @@ public class CompanyService {
     private final CompanyRepository companyRepository;
     private final CompanyNameHistoryRepository companyNameHistoryRepository;
 
+    /**
+     * @param companyNameHistoryRepository appends rows on create and rename
+     */
     public CompanyService(
             CompanyRepository companyRepository,
             CompanyNameHistoryRepository companyNameHistoryRepository
@@ -60,8 +64,12 @@ public class CompanyService {
      */
     @Transactional
     public CompanyResponse updateName(String registrationNumber, String newName) {
-        var company = companyRepository.findByRegistrationNumber(registrationNumber)
+        Company company = companyRepository.findByRegistrationNumber(registrationNumber)
                 .orElseThrow(() -> new CompanyNotFoundException(registrationNumber));
+
+        if (company.getStatus() != CompanyStatus.ACTIVE) {
+            throw new CompanyInactiveException(registrationNumber);
+        }
 
         if (company.getName().equals(newName)) {
             return CompanyResponse.from(company);

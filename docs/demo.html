@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Company Registration API — Demo Guide</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --surface: #1a2332;
+      --border: #2d3a4f;
+      --text: #e7ecf3;
+      --muted: #8b9cb3;
+      --accent: #3b82f6;
+      --accent-dim: #1e3a5f;
+      --ok: #22c55e;
+      --warn: #f59e0b;
+      --fail: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      margin: 0;
+      padding: 2rem 1rem 4rem;
+    }
+    .wrap { max-width: 52rem; margin: 0 auto; }
+    header {
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 1.5rem;
+      margin-bottom: 2rem;
+    }
+    h1 { font-size: 1.75rem; margin: 0 0 0.5rem; font-weight: 600; }
+    .subtitle { color: var(--muted); margin: 0; font-size: 0.95rem; }
+    h2 {
+      font-size: 1.15rem;
+      margin: 2rem 0 0.75rem;
+      color: var(--accent);
+      font-weight: 600;
+    }
+    p, li { color: var(--text); }
+    .muted { color: var(--muted); font-size: 0.9rem; }
+    section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.25rem 1.5rem;
+      margin-bottom: 1.25rem;
+    }
+    ul { margin: 0.5rem 0; padding-left: 1.25rem; }
+    code {
+      background: var(--accent-dim);
+      padding: 0.1em 0.4em;
+      border-radius: 4px;
+      font-size: 0.88em;
+    }
+    .flow {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.35rem 0.5rem;
+      margin: 1rem 0;
+      font-size: 0.9rem;
+    }
+    .step {
+      background: var(--accent-dim);
+      border: 1px solid var(--border);
+      padding: 0.4rem 0.65rem;
+      border-radius: 6px;
+    }
+    .arrow { color: var(--muted); }
+    .status-diagram {
+      display: grid;
+      gap: 0.75rem;
+      margin: 1rem 0;
+    }
+    .status-row {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+    .status {
+      padding: 0.35rem 0.75rem;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+    .pending { background: #374151; color: #d1d5db; }
+    .processing { background: #1e3a5f; color: #93c5fd; }
+    .completed { background: #14532d; color: #86efac; }
+    .failed { background: #450a0a; color: #fca5a5; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.88rem;
+      margin-top: 0.75rem;
+    }
+    th, td {
+      text-align: left;
+      padding: 0.5rem 0.75rem;
+      border-bottom: 1px solid var(--border);
+    }
+    th { color: var(--muted); font-weight: 500; }
+    footer {
+      margin-top: 2rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--border);
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Company Registration API</h1>
+      <p class="subtitle">Demo guide · Java 25 · Spring Boot 4 · HTTPS :8443</p>
+    </header>
+
+    <section id="purpose">
+      <h2>1. Purpose &amp; clients</h2>
+      <p>
+        A <strong>REST API</strong> for <strong>asynchronous company registration</strong>:
+        clients submit a registration, receive a <code>requestId</code>, poll until the job
+        finishes, and optionally rename an active company later. Duplicate checks (DB + vector-search placeholder)
+        run in a <strong>background worker</strong>, not on the HTTP thread.
+      </p>
+      <p><strong>Target clients</strong> are <strong>B2B integrators</strong> — partner systems, internal apps, or portals — each with an API key in the <code>clients</code> table:</p>
+      <ul>
+        <li><code>dev-client</code>, <code>partner-client</code>, <code>internal-client</code> (see seed data)</li>
+        <li>Authenticate with header <code>X-API-Key</code>; the server resolves <code>client_id</code> for idempotency and request scoping</li>
+      </ul>
+      <p class="muted">Not a browser UI — callers are backend services or automation using JSON over HTTPS.</p>
+    </section>
+
+    <section id="registration-flow">
+      <h2>2a. Registration flow</h2>
+      <div class="flow">
+        <span class="step">Client</span>
+        <span class="arrow">→</span>
+        <span class="step">POST /api/companies</span>
+        <span class="arrow">→</span>
+        <span class="step">202 + requestId</span>
+        <span class="arrow">→</span>
+        <span class="step">Background worker</span>
+        <span class="arrow">→</span>
+        <span class="step">GET …/requests/{id} poll</span>
+      </div>
+      <ol>
+        <li>Send <code>clientRequestId</code> (UUID per form submit), <code>registrationNumber</code>, <code>name</code>.</li>
+        <li>API saves a <strong>PENDING</strong> row → <strong>202 Accepted</strong> (or <strong>200</strong> if same <code>clientRequestId</code> replay).</li>
+        <li>Worker: <strong>PENDING → PROCESSING</strong>, runs DB + vector lookup, creates/links company → <strong>COMPLETED</strong> or <strong>FAILED</strong>.</li>
+        <li>Client polls <code>GET /api/companies/requests/{requestId}</code> until terminal status.</li>
+      </ol>
+    </section>
+
+    <section id="update-flow">
+      <h2>2b. Update name flow</h2>
+      <div class="flow">
+        <span class="step">Client</span>
+        <span class="arrow">→</span>
+        <span class="step">PUT /api/companies/{registrationNumber}</span>
+        <span class="arrow">→</span>
+        <span class="step">JSON {"name":"…"}</span>
+        <span class="arrow">→</span>
+        <span class="step">200 + CompanyResponse</span>
+      </div>
+      <ul>
+        <li>Synchronous — no <code>requestId</code>; updates an <strong>ACTIVE</strong> company only.</li>
+        <li><strong>INACTIVE</strong> → <strong>409</strong>; reactivate via registration <code>POST</code>.</li>
+        <li>Append-only row in <code>company_name_history</code> for each rename.</li>
+      </ul>
+    </section>
+
+    <section id="status">
+      <h2>3. Registration request status</h2>
+      <div class="status-diagram">
+        <div class="status-row">
+          <span class="status pending">PENDING</span>
+          <span class="arrow">→</span>
+          <span class="status processing">PROCESSING</span>
+          <span class="arrow">→</span>
+          <span class="status completed">COMPLETED</span>
+        </div>
+        <div class="status-row">
+          <span class="status pending">PENDING</span>
+          <span class="arrow">→</span>
+          <span class="status processing">PROCESSING</span>
+          <span class="arrow">→</span>
+          <span class="status failed">FAILED</span>
+        </div>
+      </div>
+      <table>
+        <thead>
+          <tr><th>Status</th><th>Meaning</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>PENDING</code></td><td>Saved on submit; waiting for worker</td></tr>
+          <tr><td><code>PROCESSING</code></td><td>Worker running duplicate lookup / register</td></tr>
+          <tr><td><code>COMPLETED</code></td><td>Company registered or linked (terminal)</td></tr>
+          <tr><td><code>FAILED</code></td><td>Conflict or error; see <code>errorMessage</code> (terminal)</td></tr>
+        </tbody>
+      </table>
+      <p class="muted">Transitions are logged in <code>registration_request_status_history</code> (not returned on the public status API).</p>
+    </section>
+
+    <section id="tech">
+      <h2>4. Technology highlights</h2>
+      <table>
+        <thead>
+          <tr><th>Area</th><th>What we use</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Thread control</strong></td>
+            <td>
+              Tomcat HTTP pool (max 50) · Hikari DB pool (max 15) ·
+              <code>registrationTaskExecutor</code> (core 2, max 8, queue 100) for async jobs ·
+              tests use <code>SyncTaskExecutor</code> for deterministic runs
+            </td>
+          </tr>
+          <tr>
+            <td><strong>JPA / Hibernate</strong></td>
+            <td>Entities, Spring Data repositories, <code>@Transactional</code>, status history append-only tables</td>
+          </tr>
+          <tr>
+            <td><strong>@RestControllerAdvice</strong></td>
+            <td><code>GlobalExceptionHandler</code> maps domain exceptions → HTTP 400/404/409 with JSON <code>message</code></td>
+          </tr>
+          <tr>
+            <td><strong>HTTPS</strong></td>
+            <td>TLS on port <strong>8443</strong> (PKCS12 keystore); API key never sent over plain HTTP in prod</td>
+          </tr>
+          <tr>
+            <td><strong>DB performance</strong></td>
+            <td>Hikari pool sizing vs HTTP/async workers · idle/max-lifetime for cloud DB (Neon) · partial unique index on ACTIVE company names · pending-request index for future scheduled polling</td>
+          </tr>
+          <tr>
+            <td><strong>API key cache</strong></td>
+            <td><code>ClientCache</code> loads <code>clients</code> at startup; constant-time key compare; admin <code>POST /api/admin/cache/clients/reload</code> per JVM</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <footer>
+      Keep this page in sync with <code>README.md</code> when behavior or architecture changes.
+      Open locally: <code>docs/demo.html</code> · API base: <code>https://localhost:8443</code>
+    </footer>
+  </div>
+</body>
+</html>

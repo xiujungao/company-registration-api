@@ -12,6 +12,12 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import java.time.Instant;
 
+/**
+ * One recorded company display name at a point in time ({@code company_name_history}).
+ * <p>
+ * Initial registration and each rename via {@link com.jackie.companyregistration.service.CompanyService}
+ * append a row. {@link #company} is loaded lazily ({@link FetchType#LAZY}).
+ */
 @Entity
 @Table(name = "company_name_history")
 public class CompanyNameHistory {
@@ -33,6 +39,10 @@ public class CompanyNameHistory {
     protected CompanyNameHistory() {
     }
 
+    /**
+     * @param company parent company (FK {@code company_id} set on persist)
+     * @param name    name in effect from {@link #changedAt}
+     */
     public CompanyNameHistory(Company company, String name) {
         this.company = company;
         this.name = name;

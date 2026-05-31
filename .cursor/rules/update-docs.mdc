@@ -1,0 +1,21 @@
+---
+description: Keep README and demo HTML in sync when changing the API or architecture
+globs:
+  - "**/*.java"
+  - "**/application.yaml"
+  - "**/schema.sql"
+  - "README.md"
+  - "docs/demo.html"
+alwaysApply: false
+---
+
+# Documentation sync
+
+When changing API behavior, registration/update flows, status transitions, auth, pooling, or stack details:
+
+1. Update **README.md** (API examples, architecture, config tables).
+2. Update **docs/demo.html** (sections 1–4: purpose, flows, status diagram, technology).
+
+Both files must describe the same behavior. If one changes, update the other in the same change set.
+
+Demo page path: `docs/demo.html` (open locally in a browser for presentations).

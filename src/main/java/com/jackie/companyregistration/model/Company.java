@@ -12,6 +12,12 @@ import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import java.time.Instant;
 
+/**
+ * Registered company ({@code companies}). {@link #registrationNumber} is the business key;
+ * {@link #id} is a DB-generated surrogate key ({@link GenerationType#IDENTITY}).
+ * <p>
+ * At most one ACTIVE row may use a given display {@link #name} (partial unique index in DDL).
+ */
 @Entity
 @Table(name = "companies")
 public class Company {
@@ -39,6 +45,10 @@ public class Company {
     protected Company() {
     }
 
+    /**
+     * @param registrationNumber unique registration number
+     * @param name               initial display name ({@link CompanyStatus#ACTIVE})
+     */
     public Company(String registrationNumber, String name) {
         this.registrationNumber = registrationNumber;
         this.name = name;

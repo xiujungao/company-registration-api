@@ -15,7 +15,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -337,7 +337,7 @@ class CompanyControllerTest {
                         """))
                 .andExpect(status().isAccepted());
 
-        mockMvc.perform(patch("/api/companies/{registrationNumber}/name", "REG-030")
+        mockMvc.perform(put("/api/companies/{registrationNumber}", "REG-030")
                         .header(ApiKeyAuthFilter.API_KEY_HEADER, API_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -355,6 +355,41 @@ class CompanyControllerTest {
         org.assertj.core.api.Assertions.assertThat(history).hasSize(2);
         org.assertj.core.api.Assertions.assertThat(history.get(0).getName()).isEqualTo("Old Name Corp");
         org.assertj.core.api.Assertions.assertThat(history.get(1).getName()).isEqualTo("New Name Corp");
+    }
+
+    @Test
+    void updateNameRejectsInactiveCompany() throws Exception {
+        mockMvc.perform(post("/api/companies")
+                        .header(ApiKeyAuthFilter.API_KEY_HEADER, API_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "clientRequestId": "client-req-031",
+                                  "registrationNumber": "REG-031",
+                                  "name": "Inactive Rename Corp"
+                                }
+                                """))
+                .andExpect(status().isAccepted());
+
+        var company = companyRepository.findByRegistrationNumber("REG-031").orElseThrow();
+        company.setStatus(CompanyStatus.INACTIVE);
+        companyRepository.save(company);
+
+        mockMvc.perform(put("/api/companies/{registrationNumber}", "REG-031")
+                        .header(ApiKeyAuthFilter.API_KEY_HEADER, API_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name": "Should Not Apply"
+                                }
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value(
+                        org.hamcrest.Matchers.containsString("inactive")));
+
+        org.assertj.core.api.Assertions.assertThat(companyRepository.findByRegistrationNumber("REG-031")
+                .orElseThrow()
+                .getName()).isEqualTo("Inactive Rename Corp");
     }
 
     @Test
