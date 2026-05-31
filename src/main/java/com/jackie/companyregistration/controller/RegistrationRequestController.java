@@ -1,7 +1,7 @@
 package com.jackie.companyregistration.controller;
 
 import com.jackie.companyregistration.dto.RegistrationRequestStatusResponse;
-import com.jackie.companyregistration.security.ApiClientContext;
+import com.jackie.companyregistration.security.ClientContext;
 import com.jackie.companyregistration.service.RegistrationRequestService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -24,7 +24,7 @@ public class RegistrationRequestController {
             @PathVariable Long requestId,
             HttpServletRequest httpRequest
     ) {
-        var clientId = ApiClientContext.getClientId(httpRequest);
+        var clientId = ClientContext.getClientId(httpRequest);
         return registrationRequestService.getStatus(requestId, clientId);
     }
 

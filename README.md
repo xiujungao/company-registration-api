@@ -80,7 +80,7 @@ Run scripts against your database before pointing the app at a persistent store 
 
 All `/api/**` endpoints require an API key in the `X-API-Key` header. Valid keys are stored in the `clients` table (`client_id`, `api_key`).
 
-On success, the authenticated `client_id` is attached to the request (`ApiClientContext`) for throttling or auditing.
+On success, the authenticated `client_id` is attached to the request (`ClientContext`) for throttling or auditing.
 
 Dev clients (see `db/ddl/data.sql`):
 
@@ -90,7 +90,22 @@ Dev clients (see `db/ddl/data.sql`):
 | `partner-client` | `partner-api-key-change-me` |
 | `internal-client` | `internal-api-key-change-me` |
 
-Add more clients by inserting rows into `clients`.
+Add more clients by inserting rows into `clients`. Reload the in-memory API key cache without restart:
+
+```bash
+curl -k -X POST https://localhost:8443/api/admin/cache/clients/reload \
+  -H "X-Admin-Key: your-admin-secret"
+```
+
+Response: `{"clientCount":3}`
+
+Set `app.admin.api-key` in `env.yaml` (or env var `APP_ADMIN_API_KEY`). Admin routes use `X-Admin-Key`, not `X-API-Key`. If unset, admin endpoints return **503**.
+
+**Multiple pods:** each JVM has its own cache. A load-balanced POST hits **one** pod only. Options:
+
+- Call reload on **each pod** (pod IP/DNS, or `kubectl exec` + localhost curl per pod)
+- Run a **Kubernetes Job** that curls every pod endpoint after client changes
+- Add **scheduled refresh** on all instances (every pod polls `clients` on a timer — no orchestration needed)
 
 ## Run
 

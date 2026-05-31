@@ -4,7 +4,7 @@ import com.jackie.companyregistration.dto.RegisterCompanyRequest;
 import com.jackie.companyregistration.dto.RegistrationRequestResponse;
 import com.jackie.companyregistration.dto.UpdateCompanyNameRequest;
 import com.jackie.companyregistration.dto.CompanyResponse;
-import com.jackie.companyregistration.security.ApiClientContext;
+import com.jackie.companyregistration.security.ClientContext;
 import com.jackie.companyregistration.service.CompanyService;
 import com.jackie.companyregistration.service.RegistrationRequestService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -38,7 +38,7 @@ public class CompanyController {
             @Valid @RequestBody RegisterCompanyRequest request,
             HttpServletRequest httpRequest
     ) {
-        var clientId = ApiClientContext.getClientId(httpRequest);
+        var clientId = ClientContext.getClientId(httpRequest);
         var response = registrationRequestService.submit(request, clientId);
         if (response.duplicate()) {
             return ResponseEntity.ok(response);

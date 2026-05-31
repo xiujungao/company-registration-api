@@ -10,3 +10,7 @@ spring:
     init:
       mode: always
       data-locations: classpath:db/test-data.sql
+
+app:
+  admin:
+    api-key: test-admin-key

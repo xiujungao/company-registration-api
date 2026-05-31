@@ -10,7 +10,7 @@ import java.time.Instant;
 
 @Entity
 @Table(name = "clients")
-public class ApiClient {
+public class Client {
 
     @Id
     @Column(name = "client_id", nullable = false)
@@ -25,10 +25,10 @@ public class ApiClient {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
-    protected ApiClient() {
+    protected Client() {
     }
 
-    public ApiClient(String clientId, String apiKey) {
+    public Client(String clientId, String apiKey) {
         this.clientId = clientId;
         this.apiKey = apiKey;
     }

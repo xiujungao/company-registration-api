@@ -3,8 +3,8 @@
 
 package com.jackie.companyregistration.config.seeder;
 
-import com.jackie.companyregistration.model.ApiClient;
-import com.jackie.companyregistration.repository.ApiClientRepository;
+import com.jackie.companyregistration.model.Client;
+import com.jackie.companyregistration.repository.ClientRepository;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.stereotype.Component;
@@ -27,19 +27,19 @@ public class ClientSeeder implements ApplicationRunner {
             new SeedClient(INTERNAL_CLIENT_ID, INTERNAL_API_KEY),
     };
 
-    private final ApiClientRepository apiClientRepository;
+    private final ClientRepository clientRepository;
 
-    public ClientSeeder(ApiClientRepository apiClientRepository) {
-        this.apiClientRepository = apiClientRepository;
+    public ClientSeeder(ClientRepository clientRepository) {
+        this.clientRepository = clientRepository;
     }
 
     @Override
     public void run(ApplicationArguments args) {
         for (SeedClient client : CLIENTS) {
-            if (apiClientRepository.existsById(client.clientId())) {
+            if (clientRepository.existsById(client.clientId())) {
                 continue;
             }
-            apiClientRepository.save(new ApiClient(client.clientId(), client.apiKey()));
+            clientRepository.save(new Client(client.clientId(), client.apiKey()));
         }
     }
 
