@@ -240,6 +240,10 @@
             <td>Hikari pool sizing vs HTTP/async workers · idle/max-lifetime for cloud DB (Neon) · partial unique index on ACTIVE company names · pending-request index for future scheduled polling</td>
           </tr>
           <tr>
+            <td><strong>Metrics</strong></td>
+            <td>Spring Boot Actuator + Micrometer · <code>/actuator/metrics/http.server.requests</code> (latency percentiles) · Hikari/JVM metrics</td>
+          </tr>
+          <tr>
             <td><strong>API key cache</strong></td>
             <td><code>ClientCache</code> loads <code>clients</code> at startup; constant-time key compare; admin <code>POST /api/admin/cache/clients/reload</code> per JVM</td>
           </tr>

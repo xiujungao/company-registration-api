@@ -12,7 +12,7 @@ Presentation-friendly overview (purpose, flows, status diagram, tech stack): **[
 
 - Java 25
 - Spring Boot 4.0.6
-- Spring Web MVC, Validation, Data JPA, Jackson
+- Spring Web MVC, Validation, Data JPA, Jackson, Actuator (Micrometer)
 - Project Reactor (`Mono`) for concurrent registration lookups
 - H2 (in-memory database for development)
 - HTTPS on port 8443
@@ -333,6 +333,25 @@ Registration conflicts (same reg# with different name, or same name under anothe
   "message": "Missing API key"
 }
 ```
+
+## Metrics
+
+Spring Boot Actuator + Micrometer expose request timing and pool stats at **`/actuator/*`** (same HTTPS port **8443**). These paths do **not** require `X-API-Key`; restrict exposure in production (firewall, separate port, or auth).
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /actuator/health` | Liveness (`UP` / `DOWN`) |
+| `GET /actuator/metrics` | Metric names |
+| `GET /actuator/metrics/http.server.requests` | Per-route latency (count, mean, max, p50/p95/p99) |
+
+Examples:
+
+```bash
+curl -k https://localhost:8443/actuator/health
+curl -k https://localhost:8443/actuator/metrics/http.server.requests
+```
+
+Also auto-exported: JVM memory/GC, Hikari pool (`hikaricp.connections.*`), Tomcat sessions. Percentiles for `http.server.requests` are enabled in `application.yaml`.
 
 ## Test
 

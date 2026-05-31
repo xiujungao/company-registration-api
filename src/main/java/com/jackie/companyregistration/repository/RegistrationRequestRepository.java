@@ -8,7 +8,8 @@ import org.springframework.data.jpa.repository.JpaRepository;
  * Spring Data access for {@link RegistrationRequest} rows in {@code registration_requests}.
  * <p>
  * Used by {@link com.jackie.companyregistration.service.RegistrationRequestService} for submit
- * idempotency ({@code client_id + client_request_id}) and client-scoped status polling.
+ * idempotency ({@code client_id + client_request_id}) and client-scoped status polling, and by
+ * {@link com.jackie.companyregistration.service.RegistrationRequestWorker} for background processing.
  */
 public interface RegistrationRequestRepository extends JpaRepository<RegistrationRequest, Long> {
 

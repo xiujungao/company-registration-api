@@ -5,9 +5,12 @@ import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 /**
- * Audit trail of status transitions for {@link com.jackie.companyregistration.model.RegistrationRequest}.
+ * Spring Data access for {@link RegistrationRequestStatusHistory} rows in
+ * {@code registration_request_status_history}.
  * <p>
- * Written by {@link com.jackie.companyregistration.service.RegistrationRequestStatusService}; not exposed on the public status API.
+ * Append-only audit of status transitions on {@link com.jackie.companyregistration.model.RegistrationRequest}.
+ * Written by {@link com.jackie.companyregistration.service.RegistrationRequestStatusService}; not exposed on
+ * the public status API.
  */
 public interface RegistrationRequestStatusHistoryRepository
         extends JpaRepository<RegistrationRequestStatusHistory, Long> {
