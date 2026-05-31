@@ -12,7 +12,7 @@ Presentation-friendly overview (purpose, flows, status diagram, tech stack): **[
 
 - Java 25
 - Spring Boot 4.0.6
-- Spring Web MVC, Validation, Data JPA, Jackson, Actuator (Micrometer)
+- Spring Web MVC, Validation, Data JPA, Jackson, Actuator (Micrometer), AspectJ (AOP), Prometheus registry
 - Project Reactor (`Mono`) for concurrent registration lookups
 - H2 (in-memory database for development)
 - HTTPS on port 8443
@@ -32,7 +32,9 @@ Base package: `com.jackie.companyregistration`
 | `service` | Registration workflow, company persistence |
 | `service.lookup` | `CompanyDbLookupService` + vector-search orchestration (Reactor) |
 | `security` | API-key filter and client context |
-| `config` | Async executor, API filter registration |
+| `web` | MVC interceptors (request logging, rate limiting) |
+| `aop` | Service-layer logging and Micrometer timers |
+| `config` | Async executor, auth filters, MVC interceptors, rate-limit settings |
 | `config.seeder` | Disabled Java seeders (`.java.disabled`); use `db/ddl/data.sql` instead |
 | `model` / `repository` / `dto` / `exception` | Domain, persistence, API types |
 
@@ -60,6 +62,9 @@ Application settings in `src/main/resources/application.yaml`:
 | Key | Default | Description |
 |-----|---------|-------------|
 | `app.vector-search.delay-ms` | `1000` | Placeholder vector-search delay (ms). Set to `0` in tests. |
+| `app.rate-limit.enabled` | `true` | Enable per-minute rate limits on `/api/**` (disabled in tests). |
+| `app.rate-limit.client-requests-per-minute` | `60` | Max requests per authenticated `client_id` per minute. |
+| `app.rate-limit.admin-requests-per-minute` | `10` | Max admin requests per remote IP per minute on `/api/admin/**`. |
 
 `application.yaml` imports `optional:file:./env.yaml` and falls back to in-memory H2 / classpath keystore defaults when the file is absent (for example during tests).
 
@@ -86,7 +91,9 @@ Run scripts against your database before pointing the app at a persistent store 
 
 All `/api/**` endpoints require an API key in the `X-API-Key` header. Valid keys are stored in the `clients` table (`client_id`, `api_key`).
 
-On success, the authenticated `client_id` is attached to the request (`ClientContext`) for throttling or auditing.
+On success, the authenticated `client_id` is attached to the request (`ClientContext`) for throttling, logging, and request scoping.
+
+**Rate limiting:** MVC interceptors on `/api/**` enforce fixed-window per-minute limits (see `app.rate-limit.*`). Client routes are keyed by `client_id`; admin routes by remote IP. Exceeded limits return **429 Too Many Requests** with `Retry-After: 60`.
 
 Dev clients (see `db/ddl/data.sql`):
 
@@ -185,6 +192,24 @@ RegistrationRequest │
 | No DB match | Wait for vector search → currently always no match → insert company → `COMPLETED` |
 
 Vector logic lives in `VectorSearchService.findSimilarCompany()` (placeholder returns empty). When implemented, close matches will create a human-review task instead of auto-registering.
+
+### Cross-cutting HTTP and service instrumentation
+
+Request handling layers (outer → inner):
+
+```
+HTTP request
+  → ApiKeyAuthFilter / AdminAuthFilter   (auth)
+  → RequestLoggingInterceptor            (URL, clientId, status, duration logs)
+  → RateLimitInterceptor                 (429 when over limit)
+  → @RestController
+  → @Service methods                     (wrapped by ServiceLoggingAspect)
+```
+
+- **Interceptors** apply to `/api/**` only (not Actuator or H2 console).
+- **AOP** — `aop/ServiceLoggingAspect.java` wraps every `@Service` in `com.jackie.companyregistration.service` (including `service.lookup`). It logs duration to SLF4J and records Micrometer timer **`service.method`** (tags: `class`, `method`, `exception`). Percentiles (p50/p95/p99) are set in code via `publishPercentiles(0.5, 0.95, 0.99)`, not in `application.yaml`.
+
+**Note:** `CompanyService.register` runs in the **background worker** after submit completes — it appears in metrics only after a registration reaches `COMPLETED` (or fails with an exception tag). Synchronous calls such as `CompanyService.updateName` appear immediately after `PUT /api/companies/{registrationNumber}`.
 
 ## API
 
@@ -323,6 +348,7 @@ Name changes are recorded in `company_name_history` (`name`, `changed_at`). Rows
 | **401 Unauthorized** | Missing or invalid API key |
 | **404 Not Found** | Unknown registration request or company (PUT name) |
 | **409 Conflict** | PUT name: company INACTIVE, or new name already used by another ACTIVE company |
+| **429 Too Many Requests** | Client or admin rate limit exceeded (`Retry-After: 60`) |
 
 Registration conflicts (same reg# with different name, or same name under another reg#) return **`FAILED`** on the async request after worker processing, not **400** on submit.
 
@@ -336,22 +362,65 @@ Registration conflicts (same reg# with different name, or same name under anothe
 
 ## Metrics
 
-Spring Boot Actuator + Micrometer expose request timing and pool stats at **`/actuator/*`** (same HTTPS port **8443**). These paths do **not** require `X-API-Key`; restrict exposure in production (firewall, separate port, or auth).
+Spring Boot Actuator + Micrometer expose health, build info, debug metrics, and Prometheus scrape output at **`/actuator/*`** (HTTPS port **8443**). These paths do **not** require `X-API-Key`; restrict exposure in production (firewall, separate port, or auth).
 
 | Endpoint | Purpose |
 |----------|---------|
 | `GET /actuator/health` | Liveness (`UP` / `DOWN`) |
-| `GET /actuator/metrics` | Metric names |
-| `GET /actuator/metrics/http.server.requests` | Per-route latency (count, mean, max, p50/p95/p99) |
+| `GET /actuator/info` | App metadata + Maven build info (version, build time) |
+| `GET /actuator/metrics` | List metric names; drill down with `?tag=name:value` |
+| `GET /actuator/metrics/http.server.requests` | Per-route HTTP timing (**COUNT**, **TOTAL_TIME**, **MAX** only) |
+| `GET /actuator/metrics/service.method` | Per-service-method timing (**COUNT**, **TOTAL_TIME**, **MAX** only) |
+| `GET /actuator/prometheus` | Full scrape for Prometheus/Grafana — **p50/p95/p99** for `service.method` |
 
-Examples:
+### Debug metrics (`/actuator/metrics`)
+
+Use for quick checks. Timer endpoints return **COUNT**, **TOTAL_TIME**, and **MAX** — not p50/p95/p99 (Spring Boot 4 limitation). Average latency ≈ `TOTAL_TIME / COUNT` (seconds).
 
 ```bash
 curl -k https://localhost:8443/actuator/health
-curl -k https://localhost:8443/actuator/metrics/http.server.requests
+curl -k https://localhost:8443/actuator/info
+curl -k https://localhost:8443/actuator/metrics/service.method
+curl -k "https://localhost:8443/actuator/metrics/service.method?tag=class:CompanyService&tag=method:updateName&tag=exception:none"
 ```
 
-Also auto-exported: JVM memory/GC, Hikari pool (`hikaricp.connections.*`), Tomcat sessions. Percentiles for `http.server.requests` are enabled in `application.yaml`.
+Returns **404** if no observations exist for that exact tag set (list tags from `/actuator/metrics/service.method` first).
+
+### Service performance (`/actuator/prometheus`)
+
+**Primary endpoint for service-layer latency percentiles.** Filter the text response — one URL exports all meters (JVM, Hikari, HTTP, services).
+
+```bash
+# All service.method lines
+curl -k -s https://localhost:8443/actuator/prometheus | findstr service_method_seconds
+
+# One method (PowerShell / Windows)
+curl -k -s https://localhost:8443/actuator/prometheus | findstr service_method_seconds | findstr CompanyService | findstr updateName
+```
+
+Example lines (values in **seconds**):
+
+```text
+service_method_seconds{...,class="CompanyService",method="updateName",exception="none",quantile="0.5"} 0.012
+service_method_seconds{...,quantile="0.95"} 0.045
+service_method_seconds{...,quantile="0.99"} 0.089
+service_method_seconds_count{...,class="CompanyService",method="updateName",exception="none"} 42
+service_method_seconds_sum{...,class="CompanyService",method="updateName",exception="none"} 0.756
+```
+
+| Field | Meaning |
+|-------|---------|
+| `quantile="0.5"` | p50 (median) |
+| `quantile="0.95"` | p95 |
+| `quantile="0.99"` | p99 |
+| `_count` | Number of invocations |
+| `_sum / _count` | Approximate mean |
+
+HTTP route latency uses histogram buckets on `http_server_requests_seconds_*` (configured in `application.yaml`). Service methods use **`ServiceLoggingAspect`** + Prometheus summary quantiles.
+
+**Grafana:** scrape `/actuator/prometheus` with Prometheus, then query e.g. `service_method_seconds{class="CompanyService",method="updateName",quantile="0.95"}`.
+
+Also auto-exported: JVM memory/GC, Hikari pool (`hikaricp.connections.*`), Tomcat sessions.
 
 ## Test
 

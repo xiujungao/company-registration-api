@@ -232,6 +232,31 @@
             <td><code>GlobalExceptionHandler</code> maps domain exceptions → HTTP 400/404/409 with JSON <code>message</code></td>
           </tr>
           <tr>
+            <td><strong>Filters</strong></td>
+            <td>
+              <code>ApiKeyAuthFilter</code> (<code>X-API-Key</code> on <code>/api/*</code>, skips admin) ·
+              <code>AdminAuthFilter</code> (<code>X-Admin-Key</code> on <code>/api/admin/*</code>) ·
+              run before Spring MVC; set <code>ClientContext</code> on success
+            </td>
+          </tr>
+          <tr>
+            <td><strong>Interceptors</strong></td>
+            <td>
+              <code>RequestLoggingInterceptor</code> — URL, <code>clientId</code>, status, duration (SLF4J) ·
+              <code>RateLimitInterceptor</code> — fixed-window per minute on <code>/api/**</code>;
+              <strong>429</strong> + <code>Retry-After: 60</code> (client id or admin IP)
+            </td>
+          </tr>
+          <tr>
+            <td><strong>AOP</strong></td>
+            <td>
+              <code>aop/ServiceLoggingAspect.java</code> — <code>@Around</code> on all <code>@Service</code> methods;
+              SLF4J duration logs + Micrometer <code>service.method</code> timer
+              (tags: <code>class</code>, <code>method</code>, <code>exception</code>);
+              p50/p95/p99 via <code>publishPercentiles</code> in code
+            </td>
+          </tr>
+          <tr>
             <td><strong>HTTPS</strong></td>
             <td>TLS on port <strong>8443</strong> (PKCS12 keystore); API key never sent over plain HTTP in prod</td>
           </tr>
@@ -241,7 +266,13 @@
           </tr>
           <tr>
             <td><strong>Metrics</strong></td>
-            <td>Spring Boot Actuator + Micrometer · <code>/actuator/metrics/http.server.requests</code> (latency percentiles) · Hikari/JVM metrics</td>
+            <td>
+              Actuator on <code>/actuator/*</code> (no API key) ·
+              <code>/actuator/health</code> · <code>/actuator/info</code> (Maven build info) ·
+              <code>/actuator/metrics</code> — debug (COUNT, TOTAL_TIME, MAX) ·
+              <code>/actuator/prometheus</code> — scrape for Grafana; <strong>service p50/p95/p99</strong> on
+              <code>service_method_seconds</code>
+            </td>
           </tr>
           <tr>
             <td><strong>API key cache</strong></td>
@@ -249,6 +280,53 @@
           </tr>
         </tbody>
       </table>
+    </section>
+
+    <section id="observability">
+      <h2>5. Observability &amp; limits</h2>
+      <p>Cross-cutting layers on each API call (outer → inner):</p>
+      <div class="flow">
+        <span class="step">Auth filter</span>
+        <span class="arrow">→</span>
+        <span class="step">Request log</span>
+        <span class="arrow">→</span>
+        <span class="step">Rate limit</span>
+        <span class="arrow">→</span>
+        <span class="step">Controller</span>
+        <span class="arrow">→</span>
+        <span class="step">Service (AOP)</span>
+      </div>
+      <table>
+        <thead>
+          <tr><th>Setting</th><th>Default</th><th>Effect</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>app.rate-limit.client-requests-per-minute</code></td><td>60</td><td>Per <code>client_id</code> on <code>/api/*</code> (not admin)</td></tr>
+          <tr><td><code>app.rate-limit.admin-requests-per-minute</code></td><td>10</td><td>Per remote IP on <code>/api/admin/*</code></td></tr>
+        </tbody>
+      </table>
+      <h3 style="font-size:1rem;margin:1.25rem 0 0.5rem;color:var(--text);">AOP (<code>ServiceLoggingAspect</code>)</h3>
+      <ul>
+        <li>Location: <code>src/main/java/.../aop/ServiceLoggingAspect.java</code></li>
+        <li>Wraps every <code>@Service</code> call (submit, worker <code>process</code>, <code>CompanyService.register</code>, lookup, etc.)</li>
+        <li>Logs: <code>CompanyService.updateName(..) completed in 12 ms</code></li>
+        <li>Metrics: timer <code>service.method</code> with tags <code>class</code>, <code>method</code>, <code>exception</code></li>
+        <li><code>register</code> appears only after the async worker runs (poll until <code>COMPLETED</code>)</li>
+      </ul>
+
+      <h3 style="font-size:1rem;margin:1.25rem 0 0.5rem;color:var(--text);">Prometheus scrape</h3>
+      <p>Single URL (filter output — do not read the whole page):</p>
+      <p><code>https://localhost:8443/actuator/prometheus</code></p>
+      <ul>
+        <li>Service latency: search <code>service_method_seconds</code> + <code>class</code> + <code>method</code></li>
+        <li><code>quantile="0.5"</code> / <code>0.95</code> / <code>0.99</code> = p50 / p95 / p99 (seconds)</li>
+        <li><code>_count</code> and <code>_sum</code> on the same tags → call count and average</li>
+        <li>HTTP routes: <code>http_server_requests_seconds</code> (histogram buckets)</li>
+      </ul>
+      <p class="muted">
+        <code>/actuator/metrics</code> is for quick debugging (no percentiles on timers in Spring Boot 4).
+        Use <code>/actuator/prometheus</code> or Grafana for service performance. SLF4J logs from interceptors + AOP help trace individual requests.
+      </p>
     </section>
 
     <footer>
