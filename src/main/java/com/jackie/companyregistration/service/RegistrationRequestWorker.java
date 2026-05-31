@@ -10,6 +10,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * Background processor for a single registration request: duplicate lookup, company creation, and status transitions.
+ * <p>
+ * Invoked from {@link RegistrationRequestService} via {@code registrationTaskExecutor}. Each
+ * {@link #process(Long)} runs in its own transaction ({@code REQUIRES_NEW}).
+ */
 @Service
 public class RegistrationRequestWorker {
 
@@ -30,6 +36,11 @@ public class RegistrationRequestWorker {
         this.companyService = companyService;
     }
 
+    /**
+     * Runs lookup and registration for {@code requestId} when the row is still {@code PENDING}.
+     *
+     * @param requestId registration request primary key
+     */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void process(Long requestId) {
         var request = registrationRequestRepository.findById(requestId).orElse(null);

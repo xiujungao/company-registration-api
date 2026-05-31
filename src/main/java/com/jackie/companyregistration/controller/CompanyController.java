@@ -18,6 +18,15 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * Company registration and name updates.
+ * <p>
+ * Registration is asynchronous: {@link #register} returns {@code 202 Accepted} with a
+ * {@code requestId} for polling via
+ * {@link RegistrationRequestController}. Duplicate {@code clientRequestId} for the same client
+ * returns {@code 200 OK} with the existing request. Requires API key authentication on
+ * {@code POST /api/companies}; {@code PATCH} name updates are not client-scoped in this controller.
+ */
 @RestController
 @RequestMapping("/api/companies")
 public class CompanyController {
@@ -25,6 +34,10 @@ public class CompanyController {
     private final RegistrationRequestService registrationRequestService;
     private final CompanyService companyService;
 
+    /**
+     * @param registrationRequestService submits async registration requests
+     * @param companyService             synchronous company name updates
+     */
     public CompanyController(
             RegistrationRequestService registrationRequestService,
             CompanyService companyService
@@ -33,6 +46,13 @@ public class CompanyController {
         this.companyService = companyService;
     }
 
+    /**
+     * Starts or returns an existing registration for {@code clientRequestId}.
+     *
+     * @param request     registration number, name, and client-supplied idempotency key
+     * @param httpRequest current request (client id from API key)
+     * @return {@code 200} when the same client payload was already submitted; {@code 202} when a new pending request was created
+     */
     @PostMapping
     public ResponseEntity<RegistrationRequestResponse> register(
             @Valid @RequestBody RegisterCompanyRequest request,
@@ -46,6 +66,13 @@ public class CompanyController {
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(response);
     }
 
+    /**
+     * Updates the display name for an active company and records name history.
+     *
+     * @param registrationNumber company registration number
+     * @param request            new name
+     * @return updated company
+     */
     @PatchMapping("/{registrationNumber}/name")
     public CompanyResponse updateName(
             @PathVariable String registrationNumber,

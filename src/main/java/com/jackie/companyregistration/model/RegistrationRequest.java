@@ -14,6 +14,10 @@ import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.time.Instant;
 
+/**
+ * Async registration job owned by an API {@code client_id}. Status transitions are tracked in
+ * {@code registration_request_status_history}; successful jobs link to {@code companies} via {@code company_id}.
+ */
 @Entity
 @Table(
         name = "registration_requests",

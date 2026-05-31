@@ -82,11 +82,7 @@ class CompanyControllerTest {
                 .andExpect(jsonPath("$.status").value("COMPLETED"))
                 .andExpect(jsonPath("$.clientRequestId").value("client-req-010"))
                 .andExpect(jsonPath("$.registrationNumber").value("REG-010"))
-                .andExpect(jsonPath("$.company.id").exists())
-                .andExpect(jsonPath("$.company.name").value("Async Corp"))
-                .andExpect(jsonPath("$.statusHistory.length()").value(3))
-                .andExpect(jsonPath("$.statusHistory[0].status").value("PENDING"))
-                .andExpect(jsonPath("$.statusHistory[2].status").value("COMPLETED"));
+                .andExpect(jsonPath("$.companyName").value("Async Corp"));
     }
 
     @Test
@@ -188,8 +184,8 @@ class CompanyControllerTest {
                         .header(ApiKeyAuthFilter.API_KEY_HEADER, API_KEY))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("COMPLETED"))
-                .andExpect(jsonPath("$.company.registrationNumber").value("REG-020"))
-                .andExpect(jsonPath("$.company.name").value("Idempotent Corp"));
+                .andExpect(jsonPath("$.registrationNumber").value("REG-020"))
+                .andExpect(jsonPath("$.companyName").value("Idempotent Corp"));
     }
 
     @Test
@@ -323,8 +319,8 @@ class CompanyControllerTest {
                         .header(ApiKeyAuthFilter.API_KEY_HEADER, API_KEY))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("COMPLETED"))
-                .andExpect(jsonPath("$.company.registrationNumber").value("REG-051"))
-                .andExpect(jsonPath("$.company.name").value("Reuse Me Corp"));
+                .andExpect(jsonPath("$.registrationNumber").value("REG-051"))
+                .andExpect(jsonPath("$.companyName").value("Reuse Me Corp"));
     }
 
     @Test

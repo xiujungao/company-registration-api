@@ -243,25 +243,11 @@ curl -k https://localhost:8443/api/companies/requests/1 \
 ```json
 {
   "requestId": 1,
+  "clientRequestId": "client-req-001",
   "status": "PROCESSING",
   "registrationNumber": "REG-001",
   "companyName": "Acme Corp",
-  "company": null,
-  "errorMessage": null,
-  "createdAt": "2026-05-30T12:00:00Z",
-  "updatedAt": "2026-05-30T12:00:01Z",
-  "statusHistory": [
-    {
-      "status": "PENDING",
-      "changedAt": "2026-05-30T12:00:00Z",
-      "errorMessage": null
-    },
-    {
-      "status": "PROCESSING",
-      "changedAt": "2026-05-30T12:00:01Z",
-      "errorMessage": null
-    }
-  ]
+  "errorMessage": null
 }
 ```
 
@@ -270,23 +256,11 @@ curl -k https://localhost:8443/api/companies/requests/1 \
 ```json
 {
   "requestId": 1,
+  "clientRequestId": "client-req-001",
   "status": "COMPLETED",
   "registrationNumber": "REG-001",
   "companyName": "Acme Corp",
-  "company": {
-    "id": 1,
-    "registrationNumber": "REG-001",
-    "name": "Acme Corp",
-    "status": "ACTIVE"
-  },
-  "errorMessage": null,
-  "createdAt": "2026-05-30T12:00:00Z",
-  "updatedAt": "2026-05-30T12:00:02Z",
-  "statusHistory": [
-    { "status": "PENDING", "changedAt": "2026-05-30T12:00:00Z", "errorMessage": null },
-    { "status": "PROCESSING", "changedAt": "2026-05-30T12:00:01Z", "errorMessage": null },
-    { "status": "COMPLETED", "changedAt": "2026-05-30T12:00:02Z", "errorMessage": null }
-  ]
+  "errorMessage": null
 }
 ```
 
@@ -295,13 +269,11 @@ curl -k https://localhost:8443/api/companies/requests/1 \
 ```json
 {
   "requestId": 2,
+  "clientRequestId": "client-req-002",
   "status": "FAILED",
   "registrationNumber": "REG-001",
   "companyName": "Other Name",
-  "company": null,
-  "errorMessage": "Registration number 'REG-001' is already registered with company name 'Acme Corp'. Use the update name API to change it.",
-  "createdAt": "2026-05-30T12:00:00Z",
-  "updatedAt": "2026-05-30T12:00:02Z"
+  "errorMessage": "Registration number 'REG-001' is already registered with company name 'Acme Corp'. Use the update name API to change it."
 }
 ```
 

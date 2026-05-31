@@ -13,6 +13,9 @@ import com.jackie.companyregistration.repository.CompanyRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * Synchronous company persistence: register (from the async worker), reactivate, and rename.
+ */
 @Service
 public class CompanyService {
 
@@ -27,6 +30,9 @@ public class CompanyService {
         this.companyNameHistoryRepository = companyNameHistoryRepository;
     }
 
+    /**
+     * Creates or matches a company for a registration worker. Conflicts throw {@link DuplicateCompanyException}.
+     */
     @Transactional(noRollbackFor = DuplicateCompanyException.class)
     public RegisterCompanyResult register(RegisterCompanyRequest request) {
         var existing = companyRepository.findByRegistrationNumber(request.registrationNumber());
@@ -45,6 +51,13 @@ public class CompanyService {
         return new RegisterCompanyResult(CompanyResponse.from(company), true);
     }
 
+    /**
+     * Renames an active company and records {@code company_name_history}.
+     *
+     * @param registrationNumber company key
+     * @param newName            new display name
+     * @return updated company
+     */
     @Transactional
     public CompanyResponse updateName(String registrationNumber, String newName) {
         var company = companyRepository.findByRegistrationNumber(registrationNumber)

@@ -9,6 +9,9 @@ import com.jackie.companyregistration.repository.RegistrationRequestStatusReposi
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * Persists registration request status changes and appends rows to {@code registration_request_status_history}.
+ */
 @Service
 public class RegistrationRequestStatusService {
 
@@ -26,11 +29,20 @@ public class RegistrationRequestStatusService {
         this.historyRepository = historyRepository;
     }
 
+    /** Creates a new request in {@link RequestStatus#PENDING} and records the first history entry. */
     @Transactional
     public RegistrationRequest createPending(RegistrationRequest request) {
         return transition(request, RequestStatus.PENDING, null);
     }
 
+    /**
+     * Updates request status (and optional error message) and appends a history row.
+     *
+     * @param request      request entity to update
+     * @param status       new status
+     * @param errorMessage failure detail for {@code FAILED}; {@code null} otherwise
+     * @return saved request
+     */
     @Transactional
     public RegistrationRequest transition(RegistrationRequest request, RequestStatus status, String errorMessage) {
         request.setStatusEntity(registrationRequestStatusRepository.getReferenceById(status.name()));

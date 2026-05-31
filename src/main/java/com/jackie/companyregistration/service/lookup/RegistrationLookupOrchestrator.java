@@ -8,6 +8,11 @@ import reactor.core.Disposable;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
+/**
+ * Runs DB and vector-search duplicate checks before {@link com.jackie.companyregistration.service.CompanyService#register}.
+ * <p>
+ * Vector search runs in parallel (fire-and-forget on failure); DB lookup result wins when it indicates a conflict or match.
+ */
 @Service
 public class RegistrationLookupOrchestrator {
 
@@ -24,6 +29,9 @@ public class RegistrationLookupOrchestrator {
         this.vectorSearchService = vectorSearchService;
     }
 
+    /**
+     * Blocking entry point used by {@link com.jackie.companyregistration.service.RegistrationRequestWorker}.
+     */
     public LookupOutcome resolve(String registrationNumber, String companyName) {
         return resolveAsync(registrationNumber, companyName).block();
     }

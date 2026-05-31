@@ -8,6 +8,9 @@ import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import java.time.Instant;
 
+/**
+ * API client with a unique {@code api_key}; indexed in memory by {@link com.jackie.companyregistration.security.ClientCache}.
+ */
 @Entity
 @Table(name = "clients")
 public class Client {
