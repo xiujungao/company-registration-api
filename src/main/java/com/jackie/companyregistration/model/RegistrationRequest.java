@@ -2,12 +2,11 @@ package com.jackie.companyregistration.model;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
-import jakarta.persistence.FetchType;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
-import jakarta.persistence.JoinColumn;
-import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
@@ -17,6 +16,9 @@ import java.time.Instant;
 /**
  * Async registration job owned by an API {@code client_id}. Status transitions are tracked in
  * {@code registration_request_status_history}; successful jobs link to {@code companies} via {@code company_id}.
+ * <p>
+ * {@link #status} is stored as {@code status_code} (FK to {@code registration_request_statuses}); application code
+ * uses {@link RequestStatus} only — no lookup repository.
  */
 @Entity
 @Table(
@@ -44,9 +46,9 @@ public class RegistrationRequest {
     @Column(name = "company_name", nullable = false)
     private String companyName;
 
-    @ManyToOne(optional = false, fetch = FetchType.LAZY)
-    @JoinColumn(name = "status_code", nullable = false)
-    private RegistrationRequestStatusEntity statusEntity;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status_code", nullable = false, length = 32)
+    private RequestStatus status;
 
     @Column(name = "company_id")
     private Long companyId;
@@ -113,15 +115,11 @@ public class RegistrationRequest {
     }
 
     public RequestStatus getStatus() {
-        return RequestStatus.valueOf(statusEntity.getCode());
+        return status;
     }
 
-    public void setStatusEntity(RegistrationRequestStatusEntity statusEntity) {
-        this.statusEntity = statusEntity;
-    }
-
-    public RegistrationRequestStatusEntity getStatusEntity() {
-        return statusEntity;
+    public void setStatus(RequestStatus status) {
+        this.status = status;
     }
 
     public Long getCompanyId() {

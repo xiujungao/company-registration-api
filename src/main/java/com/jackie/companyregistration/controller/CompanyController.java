@@ -62,6 +62,7 @@ public class CompanyController {
             @Valid @RequestBody RegisterCompanyRequest request,
             HttpServletRequest httpRequest
     ) {
+        // Set by ApiKeyAuthFilter on success (ClientContext); not from the request body.
         var clientId = ClientContext.getClientId(httpRequest);
         var response = registrationRequestService.submit(request, clientId);
         if (response.duplicate()) {

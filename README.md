@@ -30,7 +30,7 @@ Base package: `com.jackie.companyregistration`
 |---------|----------------|
 | `controller` | REST endpoints |
 | `service` | Registration workflow, company persistence |
-| `service.lookup` | `CompanyDbLookupService` + vector-search orchestration (Reactor) |
+| `service.lookup` | `RegistrationLookupOrchestrator` — parallel DB + vector lookup (Reactor `Mono`); `CompanyDbLookupService`, `VectorSearchService` |
 | `security` | API-key filter and client context |
 | `web` | MVC interceptors (request logging, rate limiting) |
 | `aop` | Service-layer logging and Micrometer timers |
@@ -81,7 +81,7 @@ Run scripts against your database before pointing the app at a persistent store 
 | Table | Purpose |
 |-------|---------|
 | `clients` | API client id and API key; `created_at` / `updated_at` timestamps |
-| `registration_request_statuses` | Lookup table for registration request statuses; seeded from `RequestStatus` enum on startup |
+| `registration_request_statuses` | Reference lookup for `status_code` FKs; seeded from `db/ddl/data.sql` (aligned with `RequestStatus` enum); not loaded via JPA |
 | `companies` | Registered companies; `status` (`ACTIVE` / `INACTIVE`); unique `registration_number`; unique `name` among ACTIVE rows only (`uk_companies_name_active`); timestamps |
 | `company_name_history` | Append-only log of company names (`name`, `changed_at`); order by timestamp to see renames |
 | `registration_requests` | Async job per client; `status_code` → `registration_request_statuses`; `client_id` → `clients`; index `idx_registration_requests_pending_reg_created` for scheduled polling |
@@ -172,14 +172,45 @@ No registration-number or company-name validation runs on submit. All company ch
 
 Status flow: `PENDING` → `PROCESSING` → `COMPLETED` | `FAILED`
 
-Each transition is recorded in `registration_request_status_history`. Allowed status codes are stored in `registration_request_statuses` (see `db/ddl/data.sql`; aligned with the `RequestStatus` enum).
+Each transition is recorded in `registration_request_status_history`. Allowed values are defined by the `RequestStatus` enum (`PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`).
 
-Before insert or reject, `RegistrationLookupOrchestrator` runs **two lookups in parallel** (Project Reactor `Mono`):
+#### Parallel duplicate lookup (`RegistrationLookupOrchestrator`)
+
+After the worker sets status to `PROCESSING`, `RegistrationLookupOrchestrator.resolve()` runs **DB lookup and vector search in parallel** before `CompanyService.register`. The worker thread calls `.block()` and waits for the final `LookupOutcome`; HTTP submit does not participate in this step.
+
+**Thread pools**
+
+| Pool | Where | Role |
+|------|--------|------|
+| `registrationTaskExecutor` | `AsyncConfig` | Runs `RegistrationRequestWorker.process` (one job per accepted request) |
+| Reactor `Schedulers.boundedElastic()` | `CompanyDbLookupService`, `VectorSearchService` | Runs blocking JPA lookup and vector work off the worker thread |
+| Hikari | `application.yaml` | DB connections for JPA (HTTP + workers + boundedElastic) |
+
+**Reactive pipeline** (`resolveAsync` — Project Reactor `Mono`):
+
+```
+registration-* thread (worker)
+  │
+  ├─ build vectorSearch mono (lazy — no I/O yet)
+  ├─ vectorSearch.subscribe()     → starts VectorSearchService on boundedElastic (non-blocking call)
+  ├─ companyDbLookupService.lookup() → starts DB checks on boundedElastic (when .block() subscribes)
+  │
+  └─ resolve().block() waits for:
+        DB LinkExisting / Rejected  → cancel vector subscription → return outcome (DB wins)
+        DB NoMatch                  → wait for cached vectorSearch → today RegisterNew → insert company
+```
+
+1. **`VectorSearchService.searchByName`** — lazy `Mono.fromCallable` + `subscribeOn(boundedElastic)`; simulated delay in `findSimilarCompany` (`app.vector-search.delay-ms`, default 1000).
+2. **Early `vectorSearch.subscribe()`** — fires vector work **in parallel** with DB lookup; errors are logged only (do not fail registration when DB already decided).
+3. **`CompanyDbLookupService.lookup`** — authoritative ACTIVE company rules (registration number, then exact name).
+4. **`flatMap` on DB result** — link/reject returns immediately and **disposes** the vector subscription; `NoMatch` **waits** for the cached vector mono.
+5. **`resolve().block()`** — worker unwraps `Mono<LookupOutcome>` to a plain outcome.
 
 ```
                     ┌─ CompanyDbLookupService ── registration_number then name (ACTIVE only)
-RegistrationRequest │
-                    └─ VectorSearchService      ── name similarity (placeholder, 1s delay)
+RegistrationRequest │     (boundedElastic; authoritative)
+                    └─ VectorSearchService      ── name similarity (placeholder; boundedElastic)
+                          started via subscribe(); cancelled if DB link/reject
 ```
 
 `CompanyDbLookupService` checks **ACTIVE** companies only. Inactive companies do not block reuse of their name.
@@ -191,7 +222,9 @@ RegistrationRequest │
 | `registrationNumber` not found, exact name match (ACTIVE) | Cancel vector search → `FAILED` (name registered under another number) |
 | No DB match | Wait for vector search → currently always no match → insert company → `COMPLETED` |
 
-Vector logic lives in `VectorSearchService.findSimilarCompany()` (placeholder returns empty). When implemented, close matches will create a human-review task instead of auto-registering.
+Vector logic lives in `VectorSearchService.findSimilarCompany()` (placeholder returns empty after configurable delay). When implemented with a real HTTP vector API, prefer a reactive client (`WebClient` → `Mono`) so cancellation on DB link/reject is reliable; blocking HTTP may run until client timeout even after `dispose()`.
+
+Vector failures on the fire-and-forget subscription are logged at WARN and do not change the outcome when DB returns link or reject.
 
 ### Cross-cutting HTTP and service instrumentation
 

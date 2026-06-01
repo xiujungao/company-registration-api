@@ -5,6 +5,10 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
+/**
+ * Maps {@code registration_request_statuses} for DDL and {@code db/ddl/data.sql} seed data only.
+ * Application code uses {@link RequestStatus}; do not load or persist rows via JPA.
+ */
 @Entity
 @Table(name = "registration_request_statuses")
 public class RegistrationRequestStatusEntity {
@@ -23,44 +27,6 @@ public class RegistrationRequestStatusEntity {
     private boolean terminal;
 
     protected RegistrationRequestStatusEntity() {
-    }
-
-    public RegistrationRequestStatusEntity(String code, String displayName, int sortOrder, boolean terminal) {
-        this.code = code;
-        this.displayName = displayName;
-        this.sortOrder = sortOrder;
-        this.terminal = terminal;
-    }
-
-    public static RegistrationRequestStatusEntity from(RequestStatus status) {
-        return new RegistrationRequestStatusEntity(
-                status.name(),
-                status.getDisplayName(),
-                status.getSortOrder(),
-                status.isTerminal()
-        );
-    }
-
-    public void syncFrom(RequestStatus status) {
-        this.displayName = status.getDisplayName();
-        this.sortOrder = status.getSortOrder();
-        this.terminal = status.isTerminal();
-    }
-
-    public String getCode() {
-        return code;
-    }
-
-    public String getDisplayName() {
-        return displayName;
-    }
-
-    public int getSortOrder() {
-        return sortOrder;
-    }
-
-    public boolean isTerminal() {
-        return terminal;
     }
 
 }

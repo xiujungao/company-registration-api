@@ -2,6 +2,8 @@ package com.jackie.companyregistration.model;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -12,6 +14,10 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import java.time.Instant;
 
+/**
+ * Append-only audit row for a {@link RequestStatus} change on {@link RegistrationRequest}.
+ * Written by {@link com.jackie.companyregistration.service.RegistrationRequestStatusService}; not exposed on the public API.
+ */
 @Entity
 @Table(name = "registration_request_status_history")
 public class RegistrationRequestStatusHistory {
@@ -24,9 +30,9 @@ public class RegistrationRequestStatusHistory {
     @JoinColumn(name = "registration_request_id", nullable = false)
     private RegistrationRequest registrationRequest;
 
-    @ManyToOne(optional = false, fetch = FetchType.LAZY)
-    @JoinColumn(name = "status_code", nullable = false)
-    private RegistrationRequestStatusEntity status;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status_code", nullable = false, length = 32)
+    private RequestStatus status;
 
     @Column(name = "error_message", length = 2000)
     private String errorMessage;
@@ -37,9 +43,14 @@ public class RegistrationRequestStatusHistory {
     protected RegistrationRequestStatusHistory() {
     }
 
+    /**
+     * @param registrationRequest parent request (saved)
+     * @param status              new status at this point in time
+     * @param errorMessage        failure detail for {@link RequestStatus#FAILED}; {@code null} otherwise
+     */
     public RegistrationRequestStatusHistory(
             RegistrationRequest registrationRequest,
-            RegistrationRequestStatusEntity status,
+            RequestStatus status,
             String errorMessage
     ) {
         this.registrationRequest = registrationRequest;
@@ -62,7 +73,7 @@ public class RegistrationRequestStatusHistory {
         return registrationRequest;
     }
 
-    public RegistrationRequestStatusEntity getStatus() {
+    public RequestStatus getStatus() {
         return status;
     }
 

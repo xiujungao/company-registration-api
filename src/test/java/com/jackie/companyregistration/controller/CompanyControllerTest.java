@@ -415,19 +415,22 @@ class CompanyControllerTest {
     }
 
     @Test
-    void invalidApiKeyReturnsUnauthorized() throws Exception {
+    void blankRegistrationFieldsReturnAllValidationErrors() throws Exception {
         mockMvc.perform(post("/api/companies")
-                        .header(ApiKeyAuthFilter.API_KEY_HEADER, "wrong-key")
+                        .header(ApiKeyAuthFilter.API_KEY_HEADER, API_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "clientRequestId": "client-req-004",
-                                  "registrationNumber": "REG-004",
-                                  "name": "Bad Key Corp"
+                                  "clientRequestId": "",
+                                  "registrationNumber": "",
+                                  "name": ""
                                 }
                                 """))
-                .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.message").value("Invalid API key"));
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Validation failed"))
+                .andExpect(jsonPath("$.errors.clientRequestId").value("Client request id is required"))
+                .andExpect(jsonPath("$.errors.registrationNumber").value("Registration number is required"))
+                .andExpect(jsonPath("$.errors.name").value("Company name is required"));
     }
 
 }

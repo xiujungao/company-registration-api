@@ -5,26 +5,28 @@ import com.jackie.companyregistration.model.RegistrationRequestStatusHistory;
 import com.jackie.companyregistration.model.RequestStatus;
 import com.jackie.companyregistration.repository.RegistrationRequestRepository;
 import com.jackie.companyregistration.repository.RegistrationRequestStatusHistoryRepository;
-import com.jackie.companyregistration.repository.RegistrationRequestStatusRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Persists registration request status changes and appends rows to {@code registration_request_status_history}.
+ * Status values are {@link RequestStatus} enum constants; {@code registration_request_statuses} is reference data
+ * seeded via {@code db/ddl/data.sql} for foreign-key integrity only.
  */
 @Service
 public class RegistrationRequestStatusService {
 
-    private final RegistrationRequestStatusRepository registrationRequestStatusRepository;
     private final RegistrationRequestRepository registrationRequestRepository;
     private final RegistrationRequestStatusHistoryRepository historyRepository;
 
+    /**
+     * @param registrationRequestRepository persists {@link RegistrationRequest} status updates
+     * @param historyRepository             append-only transition log
+     */
     public RegistrationRequestStatusService(
-            RegistrationRequestStatusRepository registrationRequestStatusRepository,
             RegistrationRequestRepository registrationRequestRepository,
             RegistrationRequestStatusHistoryRepository historyRepository
     ) {
-        this.registrationRequestStatusRepository = registrationRequestStatusRepository;
         this.registrationRequestRepository = registrationRequestRepository;
         this.historyRepository = historyRepository;
     }
@@ -45,14 +47,10 @@ public class RegistrationRequestStatusService {
      */
     @Transactional
     public RegistrationRequest transition(RegistrationRequest request, RequestStatus status, String errorMessage) {
-        request.setStatusEntity(registrationRequestStatusRepository.getReferenceById(status.name()));
+        request.setStatus(status);
         request.setErrorMessage(errorMessage);
         var saved = registrationRequestRepository.save(request);
-        historyRepository.save(new RegistrationRequestStatusHistory(
-                saved,
-                registrationRequestStatusRepository.getReferenceById(status.name()),
-                errorMessage
-        ));
+        historyRepository.save(new RegistrationRequestStatusHistory(saved, status, errorMessage));
         return saved;
     }
 

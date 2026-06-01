@@ -153,7 +153,7 @@
       <ol>
         <li>Send <code>clientRequestId</code> (UUID per form submit), <code>registrationNumber</code>, <code>name</code>.</li>
         <li>API saves a <strong>PENDING</strong> row → <strong>202 Accepted</strong> (or <strong>200</strong> if same <code>clientRequestId</code> replay).</li>
-        <li>Worker: <strong>PENDING → PROCESSING</strong>, runs DB + vector lookup, creates/links company → <strong>COMPLETED</strong> or <strong>FAILED</strong>.</li>
+        <li>Worker on <code>registrationTaskExecutor</code>: <strong>PENDING → PROCESSING</strong>, then parallel duplicate lookup (DB + vector), creates/links company → <strong>COMPLETED</strong> or <strong>FAILED</strong>.</li>
         <li>Client polls <code>GET /api/companies/requests/{requestId}</code> until terminal status.</li>
       </ol>
     </section>
@@ -208,6 +208,57 @@
       <p class="muted">Transitions are logged in <code>registration_request_status_history</code> (not returned on the public status API).</p>
     </section>
 
+    <section id="parallel-lookup">
+      <h2>3b. Parallel duplicate lookup (worker)</h2>
+      <p>
+        Duplicate checks run inside <code>RegistrationRequestWorker</code> via
+        <code>RegistrationLookupOrchestrator</code> — not on the HTTP thread that returned <strong>202</strong>.
+        The worker calls <code>resolve().block()</code> and waits for a single <code>LookupOutcome</code>.
+      </p>
+      <div class="flow">
+        <span class="step">Worker thread</span>
+        <span class="arrow">→</span>
+        <span class="step">vectorSearch.subscribe()</span>
+        <span class="arrow">∥</span>
+        <span class="step">DB lookup Mono</span>
+        <span class="arrow">→</span>
+        <span class="step">block() → outcome</span>
+      </div>
+      <table>
+        <thead>
+          <tr><th>Component</th><th>Runs on</th><th>Role</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>registrationTaskExecutor</code></td>
+            <td><code>registration-*</code> threads</td>
+            <td>Background worker per request; calls <code>orchestrator.resolve()</code></td>
+          </tr>
+          <tr>
+            <td><code>CompanyDbLookupService</code></td>
+            <td>Reactor <code>boundedElastic</code></td>
+            <td>Authoritative ACTIVE reg# / name checks (JPA)</td>
+          </tr>
+          <tr>
+            <td><code>VectorSearchService</code></td>
+            <td>Reactor <code>boundedElastic</code></td>
+            <td>Similarity search placeholder (<code>app.vector-search.delay-ms</code>)</td>
+          </tr>
+        </tbody>
+      </table>
+      <ol>
+        <li>Build lazy <code>vectorSearch</code> mono (<code>searchByName</code> → map → <code>cache()</code>) — no I/O yet.</li>
+        <li><code>vectorSearch.subscribe()</code> starts vector work immediately (parallel, non-blocking for the worker).</li>
+        <li>DB <code>lookup()</code> runs on another <code>boundedElastic</code> thread when <code>block()</code> subscribes.</li>
+        <li>DB <strong>link</strong> or <strong>reject</strong> → cancel vector subscription → return outcome (<strong>DB wins</strong>).</li>
+        <li>DB <strong>no match</strong> → wait for cached vector result → today always register new company.</li>
+      </ol>
+      <p class="muted">
+        Vector errors on the early subscription are logged at WARN only; they do not fail the job when DB already decided.
+        Real vector HTTP should use reactive <code>WebClient</code> so cancel on dispose is reliable.
+      </p>
+    </section>
+
     <section id="tech">
       <h2>4. Technology highlights</h2>
       <table>
@@ -215,6 +266,10 @@
           <tr><th>Area</th><th>What we use</th></tr>
         </thead>
         <tbody>
+          <tr>
+            <td><strong>HTTPS</strong></td>
+            <td>TLS on port <strong>8443</strong> (PKCS12 keystore); API key never sent over plain HTTP in prod</td>
+          </tr>
           <tr>
             <td><strong>Thread control</strong></td>
             <td>
@@ -224,12 +279,8 @@
             </td>
           </tr>
           <tr>
-            <td><strong>JPA / Hibernate</strong></td>
-            <td>Entities, Spring Data repositories, <code>@Transactional</code>, status history append-only tables</td>
-          </tr>
-          <tr>
-            <td><strong>@RestControllerAdvice</strong></td>
-            <td><code>GlobalExceptionHandler</code> maps domain exceptions → HTTP 400/404/409 with JSON <code>message</code></td>
+            <td><strong>API key cache</strong></td>
+            <td><code>ClientCache</code> loads <code>clients</code> at startup; constant-time key compare; admin <code>POST /api/admin/cache/clients/reload</code> per JVM</td>
           </tr>
           <tr>
             <td><strong>Filters</strong></td>
@@ -257,8 +308,21 @@
             </td>
           </tr>
           <tr>
-            <td><strong>HTTPS</strong></td>
-            <td>TLS on port <strong>8443</strong> (PKCS12 keystore); API key never sent over plain HTTP in prod</td>
+            <td><strong>@RestControllerAdvice</strong></td>
+            <td><code>GlobalExceptionHandler</code> maps domain exceptions → HTTP 400/404/409 with JSON <code>message</code></td>
+          </tr>
+          <tr>
+            <td><strong>Parallel lookup</strong></td>
+            <td>
+              Project Reactor (<code>Mono</code>, <code>flatMap</code>, <code>cache</code>) in
+              <code>RegistrationLookupOrchestrator</code> · DB + vector on
+              <code>Schedulers.boundedElastic()</code> · vector <code>subscribe()</code> in parallel with DB ·
+              cancel vector when DB link/reject
+            </td>
+          </tr>
+          <tr>
+            <td><strong>JPA / Hibernate</strong></td>
+            <td>Entities, Spring Data repositories, <code>@Transactional</code>, status history append-only tables</td>
           </tr>
           <tr>
             <td><strong>DB performance</strong></td>
@@ -273,10 +337,6 @@
               <code>/actuator/prometheus</code> — scrape for Grafana; <strong>service p50/p95/p99</strong> on
               <code>service_method_seconds</code>
             </td>
-          </tr>
-          <tr>
-            <td><strong>API key cache</strong></td>
-            <td><code>ClientCache</code> loads <code>clients</code> at startup; constant-time key compare; admin <code>POST /api/admin/cache/clients/reload</code> per JVM</td>
           </tr>
         </tbody>
       </table>
