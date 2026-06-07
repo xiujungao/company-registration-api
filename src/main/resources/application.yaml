@@ -30,6 +30,16 @@ spring:
     console:
       enabled: true
       path: /h2-console
+  # ssl configuration for the outbound webclient
+  # if mtls is enabled, we need to configure the keystore and truststore for the outbound webclient
+  ssl:
+    bundle:
+      jks:
+        client-mtls:
+          truststore:
+            location: classpath:ssl/truststore.p12
+            password: changeit
+            type: PKCS12
 
 # server configuration
 server:
@@ -39,10 +49,16 @@ server:
     threads:
       max: 50
       min-spare: 10
-    # Socket backlog when all connections are busy (still applies with virtual threads)
+    # accept-count: app-level queue when all worker threads (above) are busy — TCP is
+    # already accepted; requests wait here for a free thread to run handler code.
     accept-count: 100
+    # max-connections: cap on open TCP connections Tomcat keeps (active + idle keep-alive);
+    # beyond this, new clients wait in the OS TCP listen backlog or are refused.
     max-connections: 200
-  # ssl configuration
+    # Client → OS TCP backlog → Tomcat accepts → accept-count queue → worker thread → your code
+    #                 ↑ max-connections                          ↑ threads.max
+
+  # ssl configuration for the server itself
   ssl:
     enabled: true
     key-store: ${app.ssl.keystore-path:classpath:ssl/keystore.p12}
@@ -63,11 +79,11 @@ app:
     enabled: true
     client-requests-per-minute: 60
     admin-requests-per-minute: 10
+  outbound:
+    ssl-bundle: client-mtls
   petstore:
     base-url: https://petstore3.swagger.io/api/v3
     api-key: ${PETSTORE_API_KEY:}
-    trust-store-path: classpath:ssl/petstore-truststore.p12
-    trust-store-password: changeit
 
 # Actuator / Micrometer
 # - /actuator/metrics     — debug (timers: COUNT, TOTAL_TIME, MAX only)
