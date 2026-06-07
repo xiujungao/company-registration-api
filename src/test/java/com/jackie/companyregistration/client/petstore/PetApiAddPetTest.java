@@ -1,0 +1,50 @@
+package com.jackie.companyregistration.client.petstore;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+
+import com.jackie.companyregistration.client.petstore.model.Pet;
+import com.jackie.companyregistration.config.PetstoreClientConfig;
+import java.util.List;
+import java.util.UUID;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.TestPropertySource;
+
+/**
+ * Calls the live Swagger Petstore ({@code https://petstore3.swagger.io/api/v3}) through
+ * {@link PetApiClient} wired by {@link PetstoreClientConfig}. Requires network access.
+ */
+@Tag("live")
+@SpringBootTest(classes = {PetstoreClientConfig.class, PetApiClient.class})
+@TestPropertySource(properties = {
+        "app.petstore.base-url=https://petstore3.swagger.io/api/v3"
+})
+class PetApiAddPetTest {
+
+    @Autowired
+    private PetApiClient petApiClient;
+
+    @Test
+    void addPet_callsLivePetstoreAndReturnsPet() {
+        String petName = "doggie-" + UUID.randomUUID();
+        long petId = System.currentTimeMillis();
+
+        // Live petstore3.swagger.io requires client-supplied id on POST /pet (otherwise 500).
+        var requestPet = new Pet()
+                .id(petId)
+                .name(petName)
+                .photoUrls(List.of("https://example.com/dog.jpg"))
+                .status(Pet.StatusEnum.AVAILABLE);
+
+        Pet response = petApiClient.addPet(requestPet);
+
+        assertNotNull(response);
+        assertEquals(petId, response.getId());
+        assertEquals(petName, response.getName());
+        assertEquals(Pet.StatusEnum.AVAILABLE, response.getStatus());
+    }
+
+}

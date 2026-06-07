@@ -63,6 +63,9 @@ app:
     enabled: true
     client-requests-per-minute: 60
     admin-requests-per-minute: 10
+  petstore:
+    base-url: https://petstore3.swagger.io/api/v3
+    api-key: ${PETSTORE_API_KEY:}
 
 # Actuator / Micrometer
 # - /actuator/metrics     — debug (timers: COUNT, TOTAL_TIME, MAX only)
