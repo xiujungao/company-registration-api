@@ -4,23 +4,32 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import com.jackie.companyregistration.client.petstore.model.Pet;
-import com.jackie.companyregistration.config.PetstoreClientConfig;
+import com.jackie.companyregistration.config.OutboundWebClientConfig;
+import com.jackie.companyregistration.config.PetstoreApiConfig;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
+import org.springframework.boot.autoconfigure.ssl.SslAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webclient.autoconfigure.WebClientAutoConfiguration;
 import org.springframework.test.context.TestPropertySource;
 
 /**
  * Calls the live Swagger Petstore ({@code https://petstore3.swagger.io/api/v3}) through
- * {@link PetApiClient} wired by {@link PetstoreClientConfig}. Requires network access.
+ * {@link PetApiClient}. Requires network access.
  */
 @Tag("live")
-@SpringBootTest(classes = {PetstoreClientConfig.class, PetApiClient.class})
+@ImportAutoConfiguration({SslAutoConfiguration.class, WebClientAutoConfiguration.class})
+@SpringBootTest(classes = {OutboundWebClientConfig.class, PetstoreApiConfig.class, PetApiClient.class})
 @TestPropertySource(properties = {
-        "app.petstore.base-url=https://petstore3.swagger.io/api/v3"
+        "app.petstore.base-url=https://petstore3.swagger.io/api/v3",
+        "app.outbound.ssl-bundle=client-mtls",
+        "spring.ssl.bundle.jks.petstore.truststore.location=classpath:ssl/petstore-truststore.p12",
+        "spring.ssl.bundle.jks.petstore.truststore.password=changeit",
+        "spring.ssl.bundle.jks.petstore.truststore.type=PKCS12"
 })
 class PetApiAddPetTest {
 

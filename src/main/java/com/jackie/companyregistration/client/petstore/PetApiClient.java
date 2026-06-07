@@ -2,13 +2,13 @@ package com.jackie.companyregistration.client.petstore;
 
 import com.jackie.companyregistration.client.petstore.api.PetApi;
 import com.jackie.companyregistration.client.petstore.model.Pet;
-import com.jackie.companyregistration.config.PetstoreClientConfig;
+import com.jackie.companyregistration.config.PetstoreApiConfig;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 /**
  * Application wrapper around the OpenAPI-generated {@link PetApi}, wired by
- * {@link PetstoreClientConfig}.
+ * {@link PetstoreApiConfig}.
  */
 @Service
 public class PetApiClient {
