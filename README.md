@@ -13,6 +13,7 @@ Presentation-friendly overview (purpose, flows, status diagram, tech stack): **[
 - Java 25
 - Spring Boot 4.0.6
 - Spring Web MVC, Validation, Data JPA, Jackson, Actuator (Micrometer), AspectJ (AOP), Prometheus registry
+- Spring WebClient (outbound HTTPS via `spring.ssl.bundle` + `WebClientSsl`)
 - Project Reactor (`Mono`) for concurrent registration lookups
 - H2 (in-memory database for development)
 - HTTPS on port 8443
@@ -34,7 +35,8 @@ Base package: `com.jackie.companyregistration`
 | `security` | API-key filter and client context |
 | `web` | MVC interceptors (request logging, rate limiting) |
 | `aop` | Service-layer logging and Micrometer timers |
-| `config` | Async executor, auth filters, MVC interceptors, rate-limit settings |
+| `config` | Async executor, auth filters, MVC interceptors, rate-limit settings; `OutboundWebClientConfig` (shared HTTPS `WebClient`); `PetstoreApiConfig` |
+| `client.petstore` | OpenAPI-generated Petstore client + `PetApiClient` wrapper |
 | `config.seeder` | Disabled Java seeders (`.java.disabled`); use `db/ddl/data.sql` instead |
 | `model` / `repository` / `dto` / `exception` | Domain, persistence, API types |
 
@@ -54,8 +56,11 @@ For PostgreSQL (e.g. Neon), set `app.db.url`, `username`, `password`, and `drive
 | `app.db.driver-class-name` | JDBC driver (`org.h2.Driver` or `org.postgresql.Driver`) |
 | `app.db.username` | Database username |
 | `app.db.password` | Database password |
-| `app.ssl.keystore-path` | Keystore location (`classpath:...` or `file:...`) |
-| `app.ssl.keystore-password` | Keystore password |
+| `app.ssl.keystore-path` | Inbound TLS: server keystore location (`classpath:...` or `file:...`) |
+| `app.ssl.keystore-password` | Inbound TLS: server keystore password |
+| `app.outbound.ssl-bundle` | Outbound TLS: name of a `spring.ssl.bundle` entry (default `client-mtls`) |
+| `app.petstore.base-url` | Remote Petstore API base URL (OpenAPI-generated client) |
+| `app.petstore.api-key` | Optional Petstore `api_key` header |
 
 Application settings in `src/main/resources/application.yaml`:
 
@@ -65,6 +70,7 @@ Application settings in `src/main/resources/application.yaml`:
 | `app.rate-limit.enabled` | `true` | Enable per-minute rate limits on `/api/**` (disabled in tests). |
 | `app.rate-limit.client-requests-per-minute` | `60` | Max requests per authenticated `client_id` per minute. |
 | `app.rate-limit.admin-requests-per-minute` | `10` | Max admin requests per remote IP per minute on `/api/admin/**`. |
+| `spring.ssl.bundle.jks.<name>.truststore.*` | — | Outbound TLS trust material (location, password, type). See [TLS (HTTPS)](#tls-https). |
 
 `application.yaml` imports `optional:file:./env.yaml` and falls back to in-memory H2 / classpath keystore defaults when the file is absent (for example during tests).
 
@@ -128,7 +134,13 @@ mvn spring-boot:run
 
 The API listens on `https://localhost:8443` (HTTPS only; port 8080 is not used).
 
-## TLS keystore
+## TLS (HTTPS)
+
+TLS is configured in two places: **inbound** (clients calling this API) and **outbound** (this app calling remote HTTPS APIs such as Petstore).
+
+### Inbound — server (`server.ssl` / `app.ssl`)
+
+The API listens on **`https://localhost:8443`** (HTTPS only; port 8080 is not used).
 
 Keystore path and password are configured in `env.yaml` (`app.ssl.keystore-path`, `app.ssl.keystore-password`).
 
@@ -141,7 +153,7 @@ app:
     keystore-password: your-password
 ```
 
-Regenerate a dev keystore:
+Regenerate a dev server keystore:
 
 ```bash
 keytool -genkeypair -alias company-registration-api -keyalg RSA -keysize 2048 \
@@ -149,6 +161,40 @@ keytool -genkeypair -alias company-registration-api -keyalg RSA -keysize 2048 \
   -storepass changeit -keypass changeit \
   -dname "CN=localhost, OU=Development, O=Example, L=Local, ST=NA, C=US"
 ```
+
+Use `curl -k` against localhost when the dev cert is self-signed.
+
+### Outbound — WebClient (`spring.ssl.bundle` + `WebClientSsl`)
+
+Outbound HTTPS uses Spring Boot **SSL bundles** (not ad-hoc `KeyStore` loading in application code). `OutboundWebClientConfig` builds a shared `outboundWebClient` bean:
+
+```java
+ApiClient.buildWebClientBuilder()
+    .apply(webClientSsl.fromBundle(properties.sslBundle()))
+    .build();
+```
+
+Define trust material under `spring.ssl.bundle` and point `app.outbound.ssl-bundle` at the bundle name. Example from `application.yaml`:
+
+```yaml
+spring:
+  ssl:
+    bundle:
+      jks:
+        client-mtls:
+          truststore:
+            location: classpath:ssl/truststore.p12
+            password: changeit
+            type: PKCS12
+
+app:
+  outbound:
+    ssl-bundle: client-mtls
+```
+
+Dev trust store: `src/main/resources/ssl/truststore.p12` (CA certificates for remote hosts this JVM should trust). Remote APIs that use public CAs can omit a custom trust store and rely on the JVM default instead — the bundle approach keeps outbound TLS consistent and reusable for mTLS or private CAs.
+
+**Petstore client:** OpenAPI-generated sources (`mvn generate-sources`) under `com.jackie.companyregistration.client.petstore`. `PetstoreApiConfig` wires `PetApi` / `StoreApi` / `UserApi` using the shared `outboundWebClient`. Configure `app.petstore.base-url` and optional `app.petstore.api-key`.
 
 ## Architecture
 
