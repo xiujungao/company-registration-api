@@ -10,7 +10,14 @@ import org.springframework.web.reactive.function.client.WebClient;
 /**
  * Shared outbound {@link WebClient} with HTTPS trust material from {@code spring.ssl.bundle}.
  * <p>
- * Inject {@code outboundWebClient} or build additional clients with the same {@link WebClientSsl} bundle.
+ * <strong>HTTP stack:</strong> Spring reactive {@link WebClient} (Reactor Netty connector via
+ * {@link WebClientSsl}) — not {@link java.net.http.HttpClient} and not {@link RestClient}.
+ * <p>
+ * <strong>Used for:</strong> building additional outbound HTTPS clients that share the same TLS
+ * trust store. Petstore uses {@link PetstoreWebClientConfig#petstoreWebClient} instead; OAuth token
+ * calls use {@link OutboundRestClientConfig#outboundRestClient}.
+ * <p>
+ * <strong>TLS:</strong> {@code app.outbound.ssl-bundle}.
  */
 @Configuration
 @EnableConfigurationProperties(OutboundSslProperties.class)

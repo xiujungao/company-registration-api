@@ -12,14 +12,18 @@ import org.springframework.web.reactive.function.client.WebClient;
 
 /**
  * Wires the OpenAPI-generated Swagger Petstore client ({@code mvn generate-sources}).
+ * <p>
+ * Uses {@link PetstoreWebClientConfig#petstoreWebClient} for outbound HTTPS (not
+ * {@link OutboundWebClientConfig#outboundWebClient}). OAuth token exchange is handled separately by
+ * {@link PetstoreOAuth2Config} on {@link OutboundRestClientConfig#outboundRestClient}.
  */
 @Configuration
 @EnableConfigurationProperties(PetstoreProperties.class)
 public class PetstoreApiConfig {
 
     @Bean
-    ApiClient petstoreApiClient(WebClient outboundWebClient, PetstoreProperties properties) {
-        var client = new ApiClient(outboundWebClient);
+    ApiClient petstoreApiClient(WebClient petstoreWebClient, PetstoreProperties properties) {
+        var client = new ApiClient(petstoreWebClient);
         client.setBasePath(properties.baseUrl());
         if (StringUtils.hasText(properties.apiKey())) {
             client.setApiKey(properties.apiKey());

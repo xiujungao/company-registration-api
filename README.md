@@ -13,7 +13,8 @@ Presentation-friendly overview (purpose, flows, status diagram, tech stack): **[
 - Java 25
 - Spring Boot 4.0.6
 - Spring Web MVC, Validation, Data JPA, Jackson, Actuator (Micrometer), AspectJ (AOP), Prometheus registry
-- Spring WebClient (outbound HTTPS via `spring.ssl.bundle` + `WebClientSsl`)
+- Spring WebClient + RestClient (outbound HTTPS via `spring.ssl.bundle`)
+- Spring OAuth2 client (`client_credentials` for Petstore demo)
 - Project Reactor (`Mono`) for concurrent registration lookups
 - H2 (in-memory database for development)
 - HTTPS on port 8443
@@ -35,8 +36,8 @@ Base package: `com.jackie.companyregistration`
 | `security` | API-key filter and client context |
 | `web` | MVC interceptors (request logging, rate limiting) |
 | `aop` | Service-layer logging and Micrometer timers |
-| `config` | Async executor, auth filters, MVC interceptors, rate-limit settings; `OutboundWebClientConfig` (shared HTTPS `WebClient`); `PetstoreApiConfig` |
-| `client.petstore` | OpenAPI-generated Petstore client + `PetApiClient` wrapper |
+| `config` | Async executor, auth filters, MVC interceptors, rate-limit settings; outbound TLS/OAuth/Petstore wiring (`OutboundRestClientConfig`, `OutboundWebClientConfig`, `PetstoreWebClientConfig`, `PetstoreOAuth2Config`, `PetstoreApiConfig`) |
+| `client.petstore` | OpenAPI-generated Petstore client, `PetApiClient`, `PetstoreOAuth2AccessTokenInterceptor` |
 | `config.seeder` | Disabled Java seeders (`.java.disabled`); use `db/ddl/data.sql` instead |
 | `model` / `repository` / `dto` / `exception` | Domain, persistence, API types |
 
@@ -61,6 +62,9 @@ For PostgreSQL (e.g. Neon), set `app.db.url`, `username`, `password`, and `drive
 | `app.outbound.ssl-bundle` | Outbound TLS: name of a `spring.ssl.bundle` entry (default `client-mtls`) |
 | `app.petstore.base-url` | Remote Petstore API base URL (OpenAPI-generated client) |
 | `app.petstore.api-key` | Optional Petstore `api_key` header |
+| `PETSTORE_OAUTH_CLIENT_ID` | OAuth2 client id (optional; enables bearer auth when set with `token-uri`) |
+| `PETSTORE_OAUTH_CLIENT_SECRET` | OAuth2 client secret |
+| `PETSTORE_OAUTH_TOKEN_URI` | OAuth2 token endpoint (`provider.petstore.token-uri`) |
 
 Application settings in `src/main/resources/application.yaml`:
 
@@ -71,6 +75,8 @@ Application settings in `src/main/resources/application.yaml`:
 | `app.rate-limit.client-requests-per-minute` | `60` | Max requests per authenticated `client_id` per minute. |
 | `app.rate-limit.admin-requests-per-minute` | `10` | Max admin requests per remote IP per minute on `/api/admin/**`. |
 | `spring.ssl.bundle.jks.<name>.truststore.*` | — | Outbound TLS trust material (location, password, type). See [TLS (HTTPS)](#tls-https). |
+| `spring.security.oauth2.client.registration.petstore.*` | — | OAuth2 registration (client id/secret, grant type, scopes). Links to `provider.petstore` via `provider: petstore`. |
+| `spring.security.oauth2.client.provider.petstore.token-uri` | — | OAuth2 token endpoint URL. See [Petstore OAuth2](#petstore-oauth2-client_credentials). |
 
 `application.yaml` imports `optional:file:./env.yaml` and falls back to in-memory H2 / classpath keystore defaults when the file is absent (for example during tests).
 
@@ -164,17 +170,9 @@ keytool -genkeypair -alias company-registration-api -keyalg RSA -keysize 2048 \
 
 Use `curl -k` against localhost when the dev cert is self-signed.
 
-### Outbound — WebClient (`spring.ssl.bundle` + `WebClientSsl`)
+### Outbound — SSL bundle (`app.outbound.ssl-bundle`)
 
-Outbound HTTPS uses Spring Boot **SSL bundles** (not ad-hoc `KeyStore` loading in application code). `OutboundWebClientConfig` builds a shared `outboundWebClient` bean:
-
-```java
-ApiClient.buildWebClientBuilder()
-    .apply(webClientSsl.fromBundle(properties.sslBundle()))
-    .build();
-```
-
-Define trust material under `spring.ssl.bundle` and point `app.outbound.ssl-bundle` at the bundle name. Example from `application.yaml`:
+Outbound HTTPS uses Spring Boot **SSL bundles** (not ad-hoc `KeyStore` loading). All outbound clients share `app.outbound.ssl-bundle` (default `client-mtls`):
 
 ```yaml
 spring:
@@ -192,9 +190,39 @@ app:
     ssl-bundle: client-mtls
 ```
 
-Dev trust store: `src/main/resources/ssl/truststore.p12` (CA certificates for remote hosts this JVM should trust). Remote APIs that use public CAs can omit a custom trust store and rely on the JVM default instead — the bundle approach keeps outbound TLS consistent and reusable for mTLS or private CAs.
+Dev trust store: `src/main/resources/ssl/truststore.p12`. Remote APIs on public CAs can rely on the JVM default instead; the bundle approach keeps TLS consistent for private CAs and mTLS.
 
-**Petstore client:** OpenAPI-generated sources (`mvn generate-sources`) under `com.jackie.companyregistration.client.petstore`. `PetstoreApiConfig` wires `PetApi` / `StoreApi` / `UserApi` using the shared `outboundWebClient`. Configure `app.petstore.base-url` and optional `app.petstore.api-key`.
+Three outbound HTTP clients (same trust bundle, different stacks and roles):
+
+| Bean | Config class | Stack | Used for |
+|------|--------------|-------|----------|
+| `outboundRestClient` | `OutboundRestClientConfig` | `RestClient` + JDK `HttpClient` | OAuth2 **token-uri** only |
+| `outboundWebClient` | `OutboundWebClientConfig` | Reactive `WebClient` + `WebClientSsl` | Template for other outbound HTTPS clients |
+| `petstoreWebClient` | `PetstoreWebClientConfig` | Reactive `WebClient` + `WebClientSsl` | Petstore API (`app.petstore.base-url`); optional OAuth bearer filter |
+
+**Petstore API client:** OpenAPI-generated sources (`mvn generate-sources`) under `com.jackie.companyregistration.client.petstore`. `PetstoreApiConfig` wires `PetApi` / `StoreApi` / `UserApi` using `petstoreWebClient`. Configure `app.petstore.base-url` and optional `app.petstore.api-key`.
+
+### Petstore OAuth2 (client_credentials)
+
+OAuth2 is configured in `application.yaml` under `spring.security.oauth2.client`. Spring splits config into two linked maps:
+
+- **`registration.petstore`** — this app's OAuth client (`client-id`, `client-secret`, grant type, scopes). The field `provider: petstore` links to the provider block below.
+- **`provider.petstore`** — authorization-server endpoints; for `client_credentials`, only **`token-uri`** is used.
+
+Set secrets via environment variables (or override in `env.yaml`):
+
+| Variable | Purpose |
+|----------|---------|
+| `PETSTORE_OAUTH_CLIENT_ID` | OAuth2 client id |
+| `PETSTORE_OAUTH_CLIENT_SECRET` | OAuth2 client secret |
+| `PETSTORE_OAUTH_TOKEN_URI` | Token endpoint URL |
+
+When **both** `client-id` and `token-uri` are set, `PetstoreOAuth2Config` loads and:
+
+1. **Token fetch** — `petstoreOAuth2AuthorizedClientManager` POSTs to `token-uri` using **`outboundRestClient`** (same SSL bundle; works for headless/service apps with no inbound HTTP).
+2. **Petstore API calls** — `PetstoreOAuth2AccessTokenInterceptor` registers Spring Security's `ServletOAuth2AuthorizedClientExchangeFilterFunction` on **`petstoreWebClient`**. On each outbound request, that filter obtains/caches a token and adds **`Authorization: Bearer &lt;token&gt;`** to the HTTP headers before the request is sent.
+
+Boot's default OAuth2 client auto-config is excluded so empty env defaults do not fail startup; `PetstoreOAuth2Config` registers the client when credentials are present. See [Authorized Client Features](https://docs.spring.io/spring-security/reference/servlet/oauth2/client/authorized-clients.html).
 
 ## Architecture
 

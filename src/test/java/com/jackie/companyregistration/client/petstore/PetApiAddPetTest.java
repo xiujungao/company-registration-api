@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import com.jackie.companyregistration.client.petstore.model.Pet;
 import com.jackie.companyregistration.config.OutboundWebClientConfig;
 import com.jackie.companyregistration.config.PetstoreApiConfig;
+import com.jackie.companyregistration.config.PetstoreWebClientConfig;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Tag;
@@ -23,13 +24,18 @@ import org.springframework.test.context.TestPropertySource;
  */
 @Tag("live")
 @ImportAutoConfiguration({SslAutoConfiguration.class, WebClientAutoConfiguration.class})
-@SpringBootTest(classes = {OutboundWebClientConfig.class, PetstoreApiConfig.class, PetApiClient.class})
+@SpringBootTest(classes = {
+        OutboundWebClientConfig.class,
+        PetstoreWebClientConfig.class,
+        PetstoreApiConfig.class,
+        PetApiClient.class
+})
 @TestPropertySource(properties = {
         "app.petstore.base-url=https://petstore3.swagger.io/api/v3",
         "app.outbound.ssl-bundle=client-mtls",
-        "spring.ssl.bundle.jks.petstore.truststore.location=classpath:ssl/petstore-truststore.p12",
-        "spring.ssl.bundle.jks.petstore.truststore.password=changeit",
-        "spring.ssl.bundle.jks.petstore.truststore.type=PKCS12"
+        "spring.ssl.bundle.jks.client-mtls.truststore.location=classpath:ssl/truststore.p12",
+        "spring.ssl.bundle.jks.client-mtls.truststore.password=changeit",
+        "spring.ssl.bundle.jks.client-mtls.truststore.type=PKCS12"
 })
 class PetApiAddPetTest {
 

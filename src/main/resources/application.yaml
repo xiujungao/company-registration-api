@@ -3,6 +3,10 @@ spring:
   config:
     import: optional:file:./env.yaml
 
+  autoconfigure:
+    # Custom Petstore OAuth2 wiring (PetstoreOAuth2Config) allows empty client-id in yaml without startup failure
+    exclude: org.springframework.boot.security.oauth2.client.autoconfigure.OAuth2ClientAutoConfiguration
+
   # application name
   application:
     name: company-registration-api
@@ -40,6 +44,40 @@ spring:
             location: classpath:ssl/truststore.p12
             password: changeit
             type: PKCS12
+  # OAuth2 client_credentials for Petstore outbound WebClient (see README; secrets via env vars).
+  # Spring splits OAuth2 client config into two maps that link by name:
+  #   registration.<id>  — *this app's* OAuth client (who we are, how we authenticate)
+  #   provider.<name>    — authorization server endpoints (where to get tokens)
+  # registration.petstore.provider: petstore points at provider.petstore below.
+  # For client_credentials, only provider.token-uri is used (no authorization-uri / redirect-uri).
+
+  # petstore does not need oauth2 authorization. This is for demo purposes only.
+  # The provider is oauth.com/playground
+  # User Account: 
+  #   login: light-okapi@example.com
+  #   password: Ugly-Crayfish-50
+  #   client_id: EtQw7msbvpVXtzOp5SstQxAF
+  #   client_secret: lYec0aWCJ1lbu503_w1IhTxTcXDh3PWOyLJksS0KRsdSVLgb
+  security:
+    oauth2:
+      client:
+        # Per-client settings: registration id "petstore" matches PetstoreOAuth2Config / interceptor.
+        registration:
+          petstore:
+            # Lookup key into provider.* — must match a provider id defined below.
+            provider: petstore
+            client-id: ${PETSTORE_OAUTH_CLIENT_ID:EtQw7msbvpVXtzOp5SstQxAF}
+            client-secret: ${PETSTORE_OAUTH_CLIENT_SECRET:lYec0aWCJ1lbu503_w1IhTxTcXDh3PWOyLJksS0KRsdSVLgb}
+            authorization-grant-type: client_credentials
+            scope:
+              - read:pets
+              - write:pets
+        # Authorization-server endpoints for provider id "petstore" (referenced above).
+        # Token POSTs use outboundRestClient (RestClientSsl + app.outbound.ssl-bundle), not petstoreWebClient —
+        # Spring Security fetches tokens on its own HTTP client; headless/service apps need this for private CAs.
+        provider:
+          petstore:
+            token-uri: ${PETSTORE_OAUTH_TOKEN_URI:}
 
 # server configuration
 server:

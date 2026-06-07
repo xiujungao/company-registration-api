@@ -283,23 +283,80 @@
             </td>
           </tr>
           <tr>
-            <td><strong>Outbound</strong></td>
+            <td><strong>Outbound TLS</strong></td>
             <td>
-              Shared <code>outboundWebClient</code> bean applies
-              <code>WebClientSsl.fromBundle(...)</code> — no manual <code>KeyStore</code> code.
-            </td>
-            <td>
-              <code>spring.ssl.bundle.jks.&lt;name&gt;.truststore.*</code> plus
+              Shared trust via <code>spring.ssl.bundle</code> +
               <code>app.outbound.ssl-bundle</code> (default <code>client-mtls</code>);
               dev trust store <code>classpath:ssl/truststore.p12</code>
+            </td>
+            <td>
+              <code>spring.ssl.bundle.jks.&lt;name&gt;.truststore.*</code>
+            </td>
+          </tr>
+          <tr>
+            <td><strong>Outbound API</strong></td>
+            <td>
+              <code>petstoreWebClient</code> (<code>PetstoreWebClientConfig</code>) — reactive
+              <code>WebClient</code> + <code>WebClientSsl</code> for
+              <code>app.petstore.base-url</code> (OpenAPI client via <code>PetstoreApiConfig</code>)
+            </td>
+            <td>
+              <code>app.petstore.base-url</code>, optional <code>app.petstore.api-key</code>
+            </td>
+          </tr>
+          <tr>
+            <td><strong>OAuth token-uri</strong></td>
+            <td>
+              <code>outboundRestClient</code> (<code>OutboundRestClientConfig</code>) —
+              <code>RestClient</code> on JDK <code>HttpClient</code> with the same SSL bundle.
+              Spring Security uses this for <code>provider.petstore.token-uri</code> (not
+              <code>petstoreWebClient</code>). Works for headless/service apps.
+            </td>
+            <td>
+              <code>spring.security.oauth2.client.provider.petstore.token-uri</code>
             </td>
           </tr>
         </tbody>
       </table>
       <p class="muted">
-        Example consumer: OpenAPI Petstore client (<code>PetstoreApiConfig</code> →
-        <code>app.petstore.base-url</code>). Regenerate client sources with
-        <code>mvn generate-sources</code>.
+        Regenerate OpenAPI client sources with <code>mvn generate-sources</code>.
+      </p>
+    </section>
+
+    <section id="oauth">
+      <h2>3d. Petstore OAuth2 (optional)</h2>
+      <p>
+        Demo OAuth2 <code>client_credentials</code> in <code>application.yaml</code>. Spring splits
+        config into two maps linked by name:
+      </p>
+      <ul>
+        <li><code>registration.petstore</code> — this app's client id/secret, grant type, scopes; <code>provider: petstore</code> points at the provider block</li>
+        <li><code>provider.petstore</code> — authorization-server URLs; only <code>token-uri</code> is used for client_credentials</li>
+      </ul>
+      <p>When <code>client-id</code> and <code>token-uri</code> are both set:</p>
+      <div class="flow">
+        <span class="step">POST token-uri</span>
+        <span class="arrow">→</span>
+        <span class="step"><code>outboundRestClient</code></span>
+        <span class="arrow">→</span>
+        <span class="step"><code>OAuth2AuthorizedClientManager</code></span>
+        <span class="arrow">→</span>
+        <span class="step">cached access token</span>
+      </div>
+      <div class="flow">
+        <span class="step">POST /pet (Petstore API)</span>
+        <span class="arrow">→</span>
+        <span class="step"><code>petstoreWebClient</code></span>
+        <span class="arrow">→</span>
+        <span class="step"><code>ServletOAuth2AuthorizedClientExchangeFilterFunction</code></span>
+        <span class="arrow">→</span>
+        <span class="step"><code>Authorization: Bearer …</code> header added</span>
+      </div>
+      <p class="muted">
+        <code>PetstoreOAuth2AccessTokenInterceptor</code> wires the filter onto
+        <code>petstoreWebClient</code>; the filter injects the bearer header before each request is sent.
+        Env vars: <code>PETSTORE_OAUTH_CLIENT_ID</code>, <code>PETSTORE_OAUTH_CLIENT_SECRET</code>,
+        <code>PETSTORE_OAUTH_TOKEN_URI</code>.
       </p>
     </section>
 
@@ -314,8 +371,18 @@
             <td><strong>HTTPS</strong></td>
             <td>
               Inbound: TLS on <strong>8443</strong> (<code>server.ssl</code> / <code>app.ssl</code> keystore).
-              Outbound: <code>spring.ssl.bundle</code> + <code>WebClientSsl</code> on shared
-              <code>outboundWebClient</code> — see <a href="#tls">§3c TLS</a>.
+              Outbound: shared <code>spring.ssl.bundle</code> on
+              <code>petstoreWebClient</code> (API) and <code>outboundRestClient</code> (OAuth token-uri) —
+              see <a href="#tls">§3c TLS</a>.
+            </td>
+          </tr>
+          <tr>
+            <td><strong>Petstore OAuth2</strong></td>
+            <td>
+              Optional <code>client_credentials</code>: <code>registration.petstore</code> ↔
+              <code>provider.petstore</code>; bearer header via
+              <code>ServletOAuth2AuthorizedClientExchangeFilterFunction</code> on
+              <code>petstoreWebClient</code> — see <a href="#oauth">§3d OAuth</a>.
             </td>
           </tr>
           <tr>
