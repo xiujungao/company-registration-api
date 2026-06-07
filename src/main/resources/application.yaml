@@ -66,6 +66,8 @@ app:
   petstore:
     base-url: https://petstore3.swagger.io/api/v3
     api-key: ${PETSTORE_API_KEY:}
+    trust-store-path: classpath:ssl/petstore-truststore.p12
+    trust-store-password: changeit
 
 # Actuator / Micrometer
 # - /actuator/metrics     — debug (timers: COUNT, TOTAL_TIME, MAX only)
