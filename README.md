@@ -59,7 +59,10 @@ For PostgreSQL (e.g. Neon), set `app.db.url`, `username`, `password`, and `drive
 | `app.db.password` | Database password |
 | `app.ssl.keystore-path` | Inbound TLS: server keystore location (`classpath:...` or `file:...`) |
 | `app.ssl.keystore-password` | Inbound TLS: server keystore password |
-| `app.outbound.ssl-bundle` | Outbound TLS: name of a `spring.ssl.bundle` entry (default `client-mtls`) |
+| `spring.http.clients.ssl.bundle` | Outbound TLS: name of a `spring.ssl.bundle` entry (default `client-mtls`) |
+| `spring.http.clients.connect-timeout` | Outbound HTTPS connect timeout (default `10s`) — TCP connect / TLS handshake |
+| `spring.http.clients.read-timeout` | Outbound HTTPS read timeout (default `30s`) — wait for response after connected |
+| `spring.http.clients.redirects` | Outbound redirect policy: `follow`, `follow-when-possible`, `dont-follow` (default `follow-when-possible`) |
 | `app.petstore.base-url` | Remote Petstore API base URL (OpenAPI-generated client) |
 | `app.petstore.api-key` | Optional Petstore `api_key` header |
 | `PETSTORE_OAUTH_CLIENT_ID` | OAuth2 client id (optional; enables bearer auth when set with `token-uri`) |
@@ -170,9 +173,9 @@ keytool -genkeypair -alias company-registration-api -keyalg RSA -keysize 2048 \
 
 Use `curl -k` against localhost when the dev cert is self-signed.
 
-### Outbound — SSL bundle (`app.outbound.ssl-bundle`)
+### Outbound — HTTP clients (`spring.http.clients.*`)
 
-Outbound HTTPS uses Spring Boot **SSL bundles** (not ad-hoc `KeyStore` loading). All outbound clients share `app.outbound.ssl-bundle` (default `client-mtls`):
+Outbound HTTPS uses Spring Boot **SSL bundles** (not ad-hoc `KeyStore` loading) and global HTTP client settings from `spring.http.clients.*`:
 
 ```yaml
 spring:
@@ -184,11 +187,16 @@ spring:
             location: classpath:ssl/truststore.p12
             password: changeit
             type: PKCS12
-
-app:
-  outbound:
-    ssl-bundle: client-mtls
+  http:
+    clients:
+      connect-timeout: 10s
+      read-timeout: 30s
+      redirects: follow-when-possible
+      ssl:
+        bundle: client-mtls
 ```
+
+Timeouts and redirects apply to **`outboundRestClient`** (OAuth token-uri), **`petstoreWebClient`**, and **`outboundWebClient`** via Boot auto-configured `HttpClientSettings`.
 
 Dev trust store: `src/main/resources/ssl/truststore.p12`. Remote APIs on public CAs can rely on the JVM default instead; the bundle approach keeps TLS consistent for private CAs and mTLS.
 

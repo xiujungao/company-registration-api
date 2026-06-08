@@ -286,11 +286,14 @@
             <td><strong>Outbound TLS</strong></td>
             <td>
               Shared trust via <code>spring.ssl.bundle</code> +
-              <code>app.outbound.ssl-bundle</code> (default <code>client-mtls</code>);
+              <code>spring.http.clients.ssl.bundle</code> (default <code>client-mtls</code>);
               dev trust store <code>classpath:ssl/truststore.p12</code>
             </td>
             <td>
-              <code>spring.ssl.bundle.jks.&lt;name&gt;.truststore.*</code>
+              <code>spring.ssl.bundle.jks.&lt;name&gt;.truststore.*</code>;
+              <code>spring.http.clients.connect-timeout</code> (default <code>10s</code>),
+              <code>read-timeout</code> (<code>30s</code>),
+              <code>redirects</code>
             </td>
           </tr>
           <tr>

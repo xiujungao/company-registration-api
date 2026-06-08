@@ -44,6 +44,14 @@ spring:
             location: classpath:ssl/truststore.p12
             password: changeit
             type: PKCS12
+  # Global outbound HTTP client settings (RestClient + WebClient): timeouts, redirects, SSL bundle
+  http:
+    clients:
+      connect-timeout: 10s
+      read-timeout: 30s
+      redirects: follow-when-possible
+      ssl:
+        bundle: client-mtls
   # OAuth2 client_credentials for Petstore outbound WebClient (see README; secrets via env vars).
   # Spring splits OAuth2 client config into two maps that link by name:
   #   registration.<id>  — *this app's* OAuth client (who we are, how we authenticate)
@@ -73,7 +81,7 @@ spring:
               - read:pets
               - write:pets
         # Authorization-server endpoints for provider id "petstore" (referenced above).
-        # Token POSTs use outboundRestClient (RestClientSsl + app.outbound.ssl-bundle), not petstoreWebClient —
+        # Token POSTs use outboundRestClient (spring.http.clients.ssl.bundle), not petstoreWebClient —
         # Spring Security fetches tokens on its own HTTP client; headless/service apps need this for private CAs.
         provider:
           petstore:
@@ -117,8 +125,6 @@ app:
     enabled: true
     client-requests-per-minute: 60
     admin-requests-per-minute: 10
-  outbound:
-    ssl-bundle: client-mtls
   petstore:
     base-url: https://petstore3.swagger.io/api/v3
     api-key: ${PETSTORE_API_KEY:}

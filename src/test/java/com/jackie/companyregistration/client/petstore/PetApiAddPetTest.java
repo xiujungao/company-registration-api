@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
 import org.springframework.boot.autoconfigure.ssl.SslAutoConfiguration;
+import org.springframework.boot.http.client.autoconfigure.HttpClientAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webclient.autoconfigure.WebClientAutoConfiguration;
 import org.springframework.test.context.TestPropertySource;
@@ -23,7 +24,7 @@ import org.springframework.test.context.TestPropertySource;
  * {@link PetApiClient}. Requires network access.
  */
 @Tag("live")
-@ImportAutoConfiguration({SslAutoConfiguration.class, WebClientAutoConfiguration.class})
+@ImportAutoConfiguration({SslAutoConfiguration.class, HttpClientAutoConfiguration.class, WebClientAutoConfiguration.class})
 @SpringBootTest(classes = {
         OutboundWebClientConfig.class,
         PetstoreWebClientConfig.class,
@@ -32,7 +33,7 @@ import org.springframework.test.context.TestPropertySource;
 })
 @TestPropertySource(properties = {
         "app.petstore.base-url=https://petstore3.swagger.io/api/v3",
-        "app.outbound.ssl-bundle=client-mtls",
+        "spring.http.clients.ssl.bundle=client-mtls",
         "spring.ssl.bundle.jks.client-mtls.truststore.location=classpath:ssl/truststore.p12",
         "spring.ssl.bundle.jks.client-mtls.truststore.password=changeit",
         "spring.ssl.bundle.jks.client-mtls.truststore.type=PKCS12"

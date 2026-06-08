@@ -24,7 +24,7 @@ import org.springframework.web.client.RestClient;
  * <strong>Token HTTP client:</strong> {@link OutboundRestClientConfig#outboundRestClient}
  * ({@link RestClient} + JDK {@link java.net.http.HttpClient}) is passed to
  * {@link RestClientClientCredentialsTokenResponseClient} so TLS to {@code token-uri} uses
- * {@code app.outbound.ssl-bundle}. Uses {@link AuthorizedClientServiceOAuth2AuthorizedClientManager}
+ * {@code spring.http.clients.ssl.bundle}. Uses {@link AuthorizedClientServiceOAuth2AuthorizedClientManager}
  * (no servlet/API required — suitable for background/service apps).
  * <p>
  * <strong>API HTTP client:</strong> not configured here; bearer tokens are attached on
